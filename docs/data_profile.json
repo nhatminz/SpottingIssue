@@ -1,0 +1,148 @@
+{
+  "records": 54,
+  "bytes": 1190992,
+  "field_types": {
+    "doc_name": {
+      "str": 54
+    },
+    "source": {
+      "str": 54
+    },
+    "web_url": {
+      "str": 54
+    },
+    "pdf_url": {
+      "str": 54
+    },
+    "official_document_id": {
+      "str": 54
+    },
+    "official_document_id_normalized": {
+      "str": 54
+    },
+    "number": {
+      "float": 54
+    },
+    "year": {
+      "float": 54
+    },
+    "code": {
+      "str": 54
+    },
+    "id_source": {
+      "str": 54
+    },
+    "category": {
+      "str": 52,
+      "NoneType": 2
+    },
+    "instance_level": {
+      "str": 54
+    },
+    "court": {
+      "str": 54
+    },
+    "court_level": {
+      "str": 54
+    },
+    "issued_date": {
+      "str": 54
+    },
+    "date_source": {
+      "str": 54
+    },
+    "precedent_number": {
+      "NoneType": 54
+    },
+    "is_precedent": {
+      "bool": 54
+    },
+    "citations_law": {
+      "list": 54
+    },
+    "citations_case": {
+      "list": 54
+    },
+    "citations_source": {
+      "str": 54
+    },
+    "num_law_citations": {
+      "int": 54
+    },
+    "num_case_citations": {
+      "int": 54
+    },
+    "markdown": {
+      "str": 54
+    },
+    "markdown_chars": {
+      "int": 54
+    },
+    "num_pages": {
+      "int": 54
+    },
+    "confidence": {
+      "NoneType": 54
+    },
+    "flags": {
+      "list": 54
+    },
+    "citations": {
+      "list": 54
+    },
+    "parent_acts": {
+      "list": 54
+    },
+    "num_citations": {
+      "int": 54
+    },
+    "num_articles": {
+      "int": 54
+    },
+    "num_khoan": {
+      "int": 54
+    },
+    "num_diem": {
+      "int": 54
+    },
+    "situation": {
+      "str": 54
+    },
+    "situation_status": {
+      "str": 54
+    },
+    "situation_attempts": {
+      "int": 54
+    },
+    "situation_judge": {
+      "dict": 54
+    },
+    "situation_error": {
+      "NoneType": 54
+    }
+  },
+  "null_counts": {
+    "category": 2,
+    "precedent_number": 54,
+    "confidence": 54,
+    "situation_error": 54
+  },
+  "lengths": {
+    "situation": {
+      "min": 342,
+      "max": 6627
+    },
+    "markdown": {
+      "min": 1752,
+      "max": 25227
+    },
+    "citations": {
+      "min": 1,
+      "max": 73
+    },
+    "citations_law": {
+      "min": 1,
+      "max": 16
+    }
+  }
+}
