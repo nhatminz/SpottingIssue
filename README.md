@@ -4,21 +4,24 @@ Project trích xuất vấn đề pháp lý từ `situation`, dùng Generator v�
 
 **Chính sách hiện tại: chỉ PASS được xuất.** Vụ không đạt chất lượng sau debate được REJECTED vào file riêng và pipeline tiếp tục. Báo cáo bản cập nhật (92 tests và Qwen fixture) ở [docs/rejected_cases_verification.md](docs/rejected_cases_verification.md).
 
-## 1. Chạy nhanh trên máy hiện tại
+## 1. Chạy trên B200 với endpoint đã serve
 
-Project nằm tại `/mnt/hdd/nhatminh/LegalDataset`. Môi trường `.venv` đã được tạo trong quá trình triển khai. Không cần sửa Python để đổi cấu hình thông thường: chỉnh default trong `scripts/run_pipeline.sh` hoặc truyền biến môi trường.
+Project root mặc định là `/workspace/storage-shared/nlp/minhpn19/LegalDataset`. Script đã trỏ cả Generator và Judge tới `http://172.29.62.173:8000/v1`, model ID `DeepSeek-V4.1-Flash-1017`. **Client chỉ gọi HTTP, không cần GPU/CUDA/PyTorch hoặc weights model local.** Nếu chưa có environment, cài Python >=3.10 và `.venv/bin/python -m pip install -e .` trong một venv mới tại B200. Chi tiết setup, đường dẫn và giải thích workers/concurrency/token budgets ở [docs/B200.md](docs/B200.md).
 
 ```bash
-cd /mnt/hdd/nhatminh/LegalDataset
+cd /workspace/storage-shared/nlp/minhpn19/LegalDataset
 
 # Kiểm tra input, config, prompt, fingerprint; không gọi API hoặc tạo output.
 DRY_RUN=true bash scripts/run_pipeline.sh
+
+# Chạy inference qua endpoint đã serve; không khởi động server/model local.
+bash scripts/run_pipeline.sh
 
 # Unit + integration tests, không dùng GPU/server.
 .venv/bin/python -m pytest -q
 ```
 
-Chạy Qwen thật, hai terminal:
+Phần Qwen dưới đây là kiểm thử GPU local tùy chọn, **không dùng khi chạy client DeepSeek trên B200**. Đường dẫn Qwen là model của máy phát triển trước đây; B200 không cần có model này. Để tái lập thử nghiệm local, override PROJECT_ROOT về checkout local. Dùng hai terminal:
 
 ```bash
 # Terminal 1: nạp Qwen3-4B, giữ terminal mở.
@@ -53,12 +56,12 @@ bash scripts/run_smoke_test.sh
 
 Fixture này trùng ví dụ định dạng trong system prompt, chỉ kiểm tra kết nối/serialization/validation/checkpoint, không đo chất lượng pháp lý hoặc khả năng khái quát hóa.
 
-## 2. Cài đặt trên máy mới / B200
+## 2. Cài đặt client / kiểm thử local tùy chọn
 
 Client pipeline chỉ cần Python >=3.10, Pydantic và httpx; không cần CUDA/PyTorch nếu dùng endpoint có sẵn. Python hệ thống máy phát triển là 3.8 nên không dùng trực tiếp.
 
 ```bash
-cd /mnt/hdd/nhatminh/LegalDataset
+cd /workspace/storage-shared/nlp/minhpn19/LegalDataset
 python3.11 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -e '.[test]'
@@ -87,20 +90,19 @@ Không cài vLLM chồng lên môi trường PyTorch quan trọng. Endpoint vLLM
 
 ## 3. Chạy production DeepSeek
 
-Mặc định trỏ Generator và Judge tới `http://127.0.0.1:8000/v1`, model ID `deepseek-flash`. Model ID phải khớp tên server expose, không phải đường dẫn weights ở client. DeepSeek production được host riêng trên B200 hoặc endpoint của bạn; script Qwen không host DeepSeek.
+Mặc định trỏ cả hai agent tới `http://172.29.62.173:8000/v1`, model ID `DeepSeek-V4.1-Flash-1017`, theo cấu hình bạn đã cung cấp. `DEEPSEEK_API_BASE` và `DEEPSEEK_MODEL` trong shell đặt default chung; `GEN_*`/`JUDGE_*` vẫn override riêng được. Model ID phải khớp tên server expose, không phải đường dẫn weights ở client. DeepSeek đã được host sẵn; không cần chạy script serve Qwen hoặc xin GPU cho client.
 
 ```bash
-cd /mnt/hdd/nhatminh/LegalDataset
+cd /workspace/storage-shared/nlp/minhpn19/LegalDataset
 
 # Endpoint không cần key: bỏ GEN_API_KEY_FILE/JUDGE_API_KEY_FILE.
 # Secret files chứa CHỈ key, không thêm tên biến hoặc dấu nháy.
-GEN_API_BASE=http://127.0.0.1:8000/v1 \
-JUDGE_API_BASE=http://127.0.0.1:8000/v1 \
-GEN_MODEL=deepseek-flash JUDGE_MODEL=deepseek-flash \
+GEN_API_BASE=http://172.29.62.173:8000/v1 \
+JUDGE_API_BASE=http://172.29.62.173:8000/v1 \
+GEN_MODEL=DeepSeek-V4.1-Flash-1017 JUDGE_MODEL=DeepSeek-V4.1-Flash-1017 \
 GEN_BACKEND=deepseek JUDGE_BACKEND=deepseek \
 GEN_API_KEY_FILE=/secure/generator.key \
 JUDGE_API_KEY_FILE=/secure/judge.key \
-CUDA_VISIBLE_DEVICES=0 \
 MAX_WORKERS=2 MAX_CONCURRENT_REQUESTS=2 BATCH_SIZE=8 \
 GEN_THINKING_ENABLED=true JUDGE_THINKING_ENABLED=true \
 GEN_THINKING_EFFORT=extra_high JUDGE_THINKING_EFFORT=extra_high \
@@ -111,8 +113,6 @@ bash scripts/run_pipeline.sh
 Nếu dùng endpoint không xác thực, lệnh cụ thể tối thiểu:
 
 ```bash
-GEN_API_BASE=http://127.0.0.1:8000/v1 \
-JUDGE_API_BASE=http://127.0.0.1:8000/v1 \
 bash scripts/run_pipeline.sh
 ```
 
@@ -135,6 +135,7 @@ Mọi trường cấu hình của `PipelineConfig` và `AgentConfig` đều có 
 
 | Nhóm | Các biến chính và ý nghĩa |
 | --- | --- |
+| Endpoint dùng chung | `DEEPSEEK_API_BASE`, `DEEPSEEK_MODEL`: defaults chung cho hai agent; không có model weights path ở client |
 | I/O | `PROJECT_ROOT`, `INPUT_PATH`, `OUTPUT_PATH`, `REJECTED_PATH`, `AUDIT_DIR`, `LOG_DIR`, `CHECKPOINT_DIR`, `PROMPT_DIR`, `RESUME`, `OVERWRITE_OUTPUT` |
 | Runtime | `CUDA_VISIBLE_DEVICES`, `MAX_WORKERS` (số vụ), `MAX_CONCURRENT_REQUESTS` (tổng request của cả hai vai), `BATCH_SIZE` (số vụ mỗi đợt), `START_INDEX` (0-based), `LIMIT` (0=toàn bộ), `RANDOM_SEED` (jitter) |
 | Generator/Judge | Cùng bộ biến với prefix `GEN_`/`JUDGE_`: `API_BASE`, `API_KEY`, `API_KEY_FILE`, `MODEL`, `BACKEND`, `THINKING_ENABLED`, `THINKING_EFFORT`, `MAX_OUTPUT_TOKENS`, `TEMPERATURE`, `TOP_P`, `SEED`, `TIMEOUT`, `MAX_RETRIES` |
@@ -178,6 +179,8 @@ Qwen switch không bảo đảm phân biệt high/max. Nếu đặt effort khác
 DeepSeek mặc định `*_STRUCTURED_OUTPUT_MODE=json_object` cho tương thích; JSON schema vẫn nằm trong system prompt và Pydantic kiểm tra mọi đáp án. Qwen smoke dùng `json_schema` để server ép cấu trúc. Các trường explanation/feedback nội bộ giới hạn 1500 ký tự để hạn chế lặp; không tự cắt đáp án, không giới hạn số issues/findings. `REQUIRE_STRUCTURED_OUTPUT=false` chỉ bỏ request response_format, không bỏ Pydantic. Repair JSON/schema và lỗi cơ học của Generator có giới hạn; không trích JSON bằng regex hoặc im lặng nhận dữ liệu hỏng. Response `finish_reason=length` luôn lỗi, không coi kết quả dở dang là hợp lệ.
 
 Giới hạn context được kiểm tra trước request. Nếu có `TOKENIZER_PATH`, client dùng tokenizer local; nếu không, dùng số UTF-8 bytes cộng overhead làm upper bound bảo thủ cho byte-fallback tokenizer, có thể từ chối sớm. Với tokenizer có quy tắc khác, cấu hình tokenizer đúng model. `TRUNCATION_POLICY=error` là chính sách duy nhất được hỗ trợ: không tự cắt nguồn khi đánh giá thiếu dữ kiện. `MAX_OUTPUT_TOKENS` cần đủ cả thinking và final content theo backend.
+
+Production mặc định `GEN_MAX_OUTPUT_TOKENS=131073` và `JUDGE_MAX_OUTPUT_TOKENS=131073` **riêng cho mỗi request ở mỗi vòng**, không chia sẻ hoặc trừ dần giữa các lượt/agent. `MAX_CONTEXT_TOKENS=262144` là guard cho input + output của từng request, chừa chỗ cho `MAX_INPUT_TOKENS=100000`. Server phải hỗ trợ ngân sách này; cấu hình client không tự tăng giới hạn server.
 
 Tài liệu tham khảo chính thức: [DeepSeek thinking](https://api-docs.deepseek.com/guides/thinking_mode/), [Qwen vLLM](https://github.com/QwenLM/Qwen3/blob/main/docs/source/deployment/vllm.md), [vLLM structured outputs](https://docs.vllm.ai/en/stable/features/structured_outputs/).
 

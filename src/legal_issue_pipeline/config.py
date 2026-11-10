@@ -14,9 +14,9 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    api_base: str = "http://127.0.0.1:8000/v1"
+    api_base: str = "http://172.29.62.173:8000/v1"
     api_key: SecretStr = SecretStr("EMPTY")
-    model: str = "deepseek-flash"
+    model: str = "DeepSeek-V4.1-Flash-1017"
     backend: Literal["deepseek", "generic"] = "deepseek"
     thinking_enabled: bool = True
     thinking_effort: str = "extra_high"
@@ -25,7 +25,7 @@ class AgentConfig(BaseModel):
     supported_efforts: list[str] = Field(default_factory=lambda: ["low", "high", "max"])
     fallback_effort: str = "high"
     structured_output_mode: Literal["json_object", "json_schema"] = "json_object"
-    max_output_tokens: int = Field(16384, ge=64)
+    max_output_tokens: int = Field(131073, ge=64)
     temperature: float | None = None
     top_p: float | None = None
     seed: int | None = None
@@ -60,7 +60,7 @@ class PipelineConfig(BaseModel):
     prompt_dir: Path
     resume: bool = True
     overwrite_output: bool = False
-    cuda_visible_devices: str = "0"
+    cuda_visible_devices: str = ""
     max_workers: int = Field(1, ge=1)
     max_concurrent_requests: int = Field(1, ge=1)
     batch_size: int = Field(8, ge=1)
@@ -87,7 +87,7 @@ class PipelineConfig(BaseModel):
     situation_error_policy: Literal["material_missing", "material_missing_or_contradiction"] = "material_missing"
     max_json_repair_retries: int = Field(2, ge=0, le=10)
     require_structured_output: bool = True
-    max_context_tokens: int = Field(131072, ge=1024)
+    max_context_tokens: int = Field(262144, ge=1024)
     max_input_tokens: int = Field(100000, ge=512)
     # Never silently truncate the judgment and then declare a verified situation.
     truncation_policy: Literal["error"] = "error"

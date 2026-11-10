@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Chỉnh trực tiếp các default hoặc đặt biến môi trường trước khi chạy.
-# Đường dẫn model local thuộc server; client dùng GEN_MODEL/JUDGE_MODEL là ID API.
-SCRIPT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-export PROJECT_ROOT="${PROJECT_ROOT:-$SCRIPT_ROOT}"
+# B200: client chỉ gọi HTTP tới DeepSeek đã serve, không load model/GPU local.
+# Chỉnh default tại đây hoặc override bằng environment variables.
+# Nếu chạy checkout ở nơi khác, đặt PROJECT_ROOT=/duong/dan/LegalDataset.
+export PROJECT_ROOT="${PROJECT_ROOT:-/workspace/storage-shared/nlp/minhpn19/LegalDataset}"
 export PYTHON_BIN="${PYTHON_BIN:-$PROJECT_ROOT/.venv/bin/python}"
+
+# Endpoint và model ID đã được cung cấp cho DeepSeek V4.1 Flash 1017.
+# Đây là ID server expose qua /v1/models, không phải filesystem path tới weights.
+# Đổi hai biến này để chuyển cả hai agent; GEN_/JUDGE_ vẫn override độc lập được.
+export DEEPSEEK_API_BASE="${DEEPSEEK_API_BASE:-http://172.29.62.173:8000/v1}"
+export DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-DeepSeek-V4.1-Flash-1017}"
 
 # Input/output: không sửa input. LIMIT=0 là toàn bộ; START_INDEX bắt đầu từ 0.
 export INPUT_PATH="${INPUT_PATH:-$PROJECT_ROOT/input/judgment_with_situation.jsonl}"
@@ -19,27 +25,36 @@ export PROMPT_DIR="${PROMPT_DIR:-$PROJECT_ROOT/prompts}"
 export RESUME="${RESUME:-true}"
 export OVERWRITE_OUTPUT="${OVERWRITE_OUTPUT:-false}"
 
-# GPU/runtime: CUDA ở client không đổi GPU của server đã chạy.
-# MAX_WORKERS: số vụ đồng thời; MAX_CONCURRENT_REQUESTS: tổng request đang bay.
-# BATCH_SIZE: số vụ tối đa được giữ trong mỗi đợt, không phải batch token của GPU.
-export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+# Runtime phía client: không cần xin GPU. CUDA không đổi GPU của model server.
+# Giữ biến caller đã đặt; mặc định rỗng. TOKENIZER_PATH rỗng => không cần Torch.
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES-}"
+# Số bản án được xử lý đồng thời; một worker giữ một vụ qua toàn bộ debate.
 export MAX_WORKERS="${MAX_WORKERS:-1}"
+# Tổng số HTTP inference requests đang chờ response, tính chung Generator/Judge.
 export MAX_CONCURRENT_REQUESTS="${MAX_CONCURRENT_REQUESTS:-1}"
+# Số bản án trong một đợt; xong cả đợt mới đưa đợt kế tiếp vào xử lý.
+# Không phải batch GPU/token của server. Nên >= MAX_WORKERS để tận dụng workers.
 export BATCH_SIZE="${BATCH_SIZE:-8}"
+# Index bản ghi đầu tiên trong INPUT (0-based): 0=dòng 1; 100=dòng 101.
 export START_INDEX="${START_INDEX:-0}"
+# Số bản ghi INPUT được chọn từ START_INDEX; 0=đến cuối file.
+# Đây không phải số vụ PASS cần thu được; REJECTED/FAILED vẫn thuộc phạm vi chọn.
 export LIMIT="${LIMIT:-0}"
 export RANDOM_SEED="${RANDOM_SEED:-42}"
 
 # Generator: endpoint/API model ID riêng. Secret file chỉ dùng khi API_KEY rỗng.
 # null = không gửi sampling parameter. extra_high -> max; medium -> high ở DeepSeek.
-export GEN_API_BASE="${GEN_API_BASE:-http://127.0.0.1:8000/v1}"
+export GEN_API_BASE="${GEN_API_BASE:-$DEEPSEEK_API_BASE}"
 export GEN_API_KEY="${GEN_API_KEY:-}"
 export GEN_API_KEY_FILE="${GEN_API_KEY_FILE:-}"
-export GEN_MODEL="${GEN_MODEL:-deepseek-flash}"
+export GEN_MODEL="${GEN_MODEL:-$DEEPSEEK_MODEL}"
 export GEN_BACKEND="${GEN_BACKEND:-deepseek}"
 export GEN_THINKING_ENABLED="${GEN_THINKING_ENABLED:-true}"
 export GEN_THINKING_EFFORT="${GEN_THINKING_EFFORT:-extra_high}"
-export GEN_MAX_OUTPUT_TOKENS="${GEN_MAX_OUTPUT_TOKENS:-16384}"
+# Trần token SINH MỚI của MỖI request Generator, gửi thành max_tokens tới API.
+# Thinking + final JSON dùng budget này theo cách tính của backend.
+# Mỗi lượt có budget 131073 riêng; không trừ token đã dùng ở lượt trước.
+export GEN_MAX_OUTPUT_TOKENS="${GEN_MAX_OUTPUT_TOKENS:-131073}"
 export GEN_TEMPERATURE="${GEN_TEMPERATURE:-null}"
 export GEN_TOP_P="${GEN_TOP_P:-null}"
 export GEN_SEED="${GEN_SEED:-null}"
@@ -54,14 +69,16 @@ export GEN_EXTRA_BODY="${GEN_EXTRA_BODY:-}"
 if [[ -z "$GEN_EXTRA_BODY" ]]; then export GEN_EXTRA_BODY='{}'; fi
 
 # Judge: có client/system prompt/context/inference riêng, dù dùng chung endpoint.
-export JUDGE_API_BASE="${JUDGE_API_BASE:-http://127.0.0.1:8000/v1}"
+export JUDGE_API_BASE="${JUDGE_API_BASE:-$DEEPSEEK_API_BASE}"
 export JUDGE_API_KEY="${JUDGE_API_KEY:-}"
 export JUDGE_API_KEY_FILE="${JUDGE_API_KEY_FILE:-}"
-export JUDGE_MODEL="${JUDGE_MODEL:-deepseek-flash}"
+export JUDGE_MODEL="${JUDGE_MODEL:-$DEEPSEEK_MODEL}"
 export JUDGE_BACKEND="${JUDGE_BACKEND:-deepseek}"
 export JUDGE_THINKING_ENABLED="${JUDGE_THINKING_ENABLED:-true}"
 export JUDGE_THINKING_EFFORT="${JUDGE_THINKING_EFFORT:-extra_high}"
-export JUDGE_MAX_OUTPUT_TOKENS="${JUDGE_MAX_OUTPUT_TOKENS:-16384}"
+# Trần token SINH MỚI của MỖI request Judge; độc lập với budget của Generator.
+# Mỗi lượt có budget 131073 riêng; không chia sẻ với Generator hoặc các vòng khác.
+export JUDGE_MAX_OUTPUT_TOKENS="${JUDGE_MAX_OUTPUT_TOKENS:-131073}"
 export JUDGE_TEMPERATURE="${JUDGE_TEMPERATURE:-null}"
 export JUDGE_TOP_P="${JUDGE_TOP_P:-null}"
 export JUDGE_SEED="${JUDGE_SEED:-null}"
@@ -104,7 +121,13 @@ export REQUIRE_STRUCTURED_OUTPUT="${REQUIRE_STRUCTURED_OUTPUT:-true}"
 # Context/request: vượt context thì dừng, không cắt bản án để kết luận sai audit.
 # TOKENIZER_PATH tuỳ chọn local tokenizer để đếm chính xác; rỗng dùng byte upper bound.
 # API_EXTRA_BODY JSON chung; *_EXTRA_BODY ghi đè có log, không cho ghi đè messages/model.
-export MAX_CONTEXT_TOKENS="${MAX_CONTEXT_TOKENS:-131072}"
+# Giới hạn INPUT + OUTPUT của từng request, không cộng hai agent với nhau.
+# Đây là guard phía client, không thay đổi context length đang cấu hình trên server.
+# Giữ giá trị này <= giới hạn thật server hỗ trợ.
+# 262144 chừa chỗ cho 100000 input + 131073 output của MỘT request.
+# Server cần hỗ trợ cả max_tokens=131073 và tổng context tương ứng.
+export MAX_CONTEXT_TOKENS="${MAX_CONTEXT_TOKENS:-262144}"
+# Giới hạn riêng cho toàn prompt đầu vào: system/schema/sources/debate history.
 export MAX_INPUT_TOKENS="${MAX_INPUT_TOKENS:-100000}"
 export TRUNCATION_POLICY="${TRUNCATION_POLICY:-error}"
 export TOKENIZER_PATH="${TOKENIZER_PATH:-}"
