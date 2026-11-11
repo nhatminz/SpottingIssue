@@ -33,14 +33,17 @@ def parse_structured(content: str, schema: type[T]) -> T:
 class BaseAgent:
     def __init__(self, client: LLMClient, config: PipelineConfig, prompt_name: str):
         self.client, self.config = client, config
-        self.system_prompt = (config.prompt_dir/prompt_name).read_text(encoding="utf-8")
+        self.scope_prompt = (config.prompt_dir/"benchmark_scope.md").read_text(encoding="utf-8")
+        self.system_prompt = (config.prompt_dir/prompt_name).read_text(encoding="utf-8")+"\n"+self.scope_prompt
         # Agent instances belong to one case, never shared between workers/cases.
         self.message_history: list[list[dict]] = []
         self.request_metrics: list[dict] = []
 
-    async def infer(self, payload: dict, schema: type[T], instruction: str = "", validate: Callable[[T], None] | None = None) -> T:
+    async def infer(self, payload: dict, schema: type[T], instruction: str = "", validate: Callable[[T], None] | None = None,
+                    system_prompt_override: str | None = None) -> T:
         schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False)
-        messages = [{"role": "system", "content": self.system_prompt+"\n"+instruction+"\nReturn ONLY a JSON object conforming to this JSON Schema:\n"+schema_json},
+        system = self.system_prompt if system_prompt_override is None else system_prompt_override+"\n"+self.scope_prompt
+        messages = [{"role": "system", "content": system+"\n"+instruction+"\nReturn ONLY a JSON object conforming to this JSON Schema:\n"+schema_json},
                     {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
         for attempt in range(self.config.max_json_repair_retries+1):
             self.message_history.append(json.loads(json.dumps(messages)))

@@ -4,6 +4,8 @@ Project trích xuất vấn đề pháp lý từ `situation`, dùng Generator v�
 
 **Chính sách hiện tại: chỉ PASS được xuất.** Vụ không đạt chất lượng sau debate được REJECTED vào file riêng và pipeline tiếp tục. Báo cáo bản cập nhật (92 tests và Qwen fixture) ở [docs/rejected_cases_verification.md](docs/rejected_cases_verification.md).
 
+**Rubric hiện tại:** chỉ CORE thuộc nội dung Tòa trực tiếp giải quyết được làm gold. Judge phải xác nhận Legal Relevance, Coverage, Grounding và Format; blind discovery mặc định bật và chỉ nhận situation. Chi tiết thay đổi, kiểm chứng và lệnh chạy bằng run mới ở [docs/strict_scope.md](docs/strict_scope.md). Các báo cáo Qwen trước đây phản ánh rubric cũ.
+
 ## 1. Chạy trên B200 với endpoint đã serve
 
 Project root mặc định là `/workspace/storage-shared/nlp/minhpn19/LegalDataset`. Script đã trỏ cả Generator và Judge tới `http://172.29.62.173:8000/v1`, model ID `DeepSeek-V4.1-Flash-1017`. **Client chỉ gọi HTTP, không cần GPU/CUDA/PyTorch hoặc weights model local.** Nếu chưa có environment, cài Python >=3.10 và `.venv/bin/python -m pip install -e .` trong một venv mới tại B200. Chi tiết setup, đường dẫn và giải thích workers/concurrency/token budgets ở [docs/B200.md](docs/B200.md).
@@ -201,7 +203,7 @@ Các class có dependency injection cho clients/controller, type hints và trác
 
 Generator lần đầu chỉ nhận `situation`. Các lượt sau nhận issues trước đó, feedback đã lọc, đánh giá phản biện đã lọc và lịch sử phản hồi tường minh của chính Generator. **Không nhận `markdown`, `citations`, `citations_law`, private audit hoặc reasoning của Judge.**
 
-Judge nhận đúng `situation`, `markdown`, `citations_law`, `citations`, candidate hiện tại cùng metadata, kết quả blind discovery tùy chọn và trao đổi có cấu trúc của vụ hiện tại. Không nhận toàn bộ conversation history của Generator. Các trường phụ từ input không tự động vào prompt.
+Judge có hai giai đoạn. Stage A (blind, mặc định bật) chỉ nhận `situation` và system guideline/scope, chưa xem Generator hoặc nguồn riêng. Stage B là request/context mới, nhận `situation`, `markdown`, `citations_law`, `citations`, candidate hiện tại cùng metadata, kết quả blind discovery và trao đổi có cấu trúc của vụ hiện tại. Không nối toàn bộ conversation history giữa hai stage hoặc giữa hai agent. Các trường phụ từ input không tự động vào prompt.
 
 `FeedbackFirewall` không cố lọc chữ trong văn xuôi: nó chỉ cho qua các enum biết trước, issue IDs hiện tại, feedback ID dạng `F1`, `F2` và quotes xuất hiện nguyên văn trong `situation`. Explanation, suggested issue text, markdown evidence, audit và mọi free text từ Judge đều private. Generator tự suy ra cách sửa từ code lỗi và bằng chứng trong nguồn được phép. Judge giữ nguyên lời giải thích đầy đủ để kiểm toán.
 
@@ -209,13 +211,15 @@ Mỗi record có agent instances, HTTP clients, message histories, debate state 
 
 ## 7. Debate và chọn candidate
 
-1. Generator sinh issues và metadata (focus, chủ thể/hành vi, tình tiết quyết định, quotes, mức trọng tâm).
-2. Judge đánh giá từng issue, coverage và tình huống. Nếu bật blind discovery, thêm một inference Judge chưa nhìn candidate trước khi đối chiếu.
+1. Judge Stage A tự tìm các vấn đề trọng tâm từ situation trong một inference độc lập; kết quả này là đề xuất, không phải đáp án chuẩn.
+2. Generator sinh issues và metadata chỉ từ situation. Judge Stage B dùng request riêng để đối chiếu hai danh sách với situation và phạm vi giải quyết trong bản án; tự tìm cả vấn đề mà hai danh sách bỏ sót.
 3. Generator trả lời từng feedback: `ACCEPT`, `CONTEST`, `PARTIALLY_ACCEPT`; phản bác phải có bằng chứng tình huống.
 4. Judge đọc phản hồi mới, trả `WITHDRAW`, `UPHOLD`, `PARTIALLY_WITHDRAW` và giải thích có quotes. Không được bỏ qua phản bác.
 5. Lặp đến PASS có validation, stagnation hoặc giới hạn vòng.
 
-**Một round = Judge evaluation -> Generator response.** Với `MAX_DEBATE_ROUNDS=N`, tối đa N lần sửa và N+1 Judge evaluations (chưa tính blind discovery/repair). Bản sửa cuối luôn được Judge kiểm tra. PASS ban đầu có thể dừng với 0 rounds; đây là 2 inference riêng, không phải skip Judge.
+**Một round = Judge evaluation -> Generator response.** Với `MAX_DEBATE_ROUNDS=N`, tối đa N lần sửa và N+1 Stage B evaluations (chưa tính blind discovery/repair). Bản sửa cuối luôn được Judge kiểm tra. PASS ban đầu có thể dừng với 0 rounds; với blind mặc định bật, có 3 inference riêng: Stage A, Generator, Stage B.
+
+Mỗi review có `classification=CORE|SUPPORTING_FACT|IRRELEVANT|DUPLICATE`. PASS chỉ khi toàn bộ issues là CORE, có quotes nguyên văn từ situation và quotes từ nhận định/quyết định xác nhận phạm vi Tòa xét xử; cả bốn tiêu chí rubric đều PASS và inventory coverage không có vấn đề trọng tâm chưa được khớp. SUPPORTING_FACT được Generator tích hợp vào tình tiết quyết định của CORE liên quan rồi bỏ issue riêng, không bị exporter âm thầm lọc để tạo PASS. Các vấn đề án phí, kháng cáo, thủ tục thường lệ hoặc tăng/giảm nhẹ mặc định ngoài scope trừ khi thực sự là yêu cầu/tranh chấp độc lập hoặc vấn đề đặc biệt được giải quyết. Đây là đánh giá ngữ nghĩa của Judge có evidence; code chỉ xác minh nguồn trích dẫn và tính nhất quán, không giả vờ dùng regex để hiểu pháp luật.
 
 Stagnation xét cấu trúc trọng tâm/chủ thể/tình tiết, evidence, codes/action của feedback, quyết định phản bác và assessment: nhận diện lặp lập luận, đảo phiên bản, số issue tăng không thêm bằng chứng, Judge đổi verdict không thêm bằng chứng. Đây là heuristic phát hiện vòng lặp; không dùng độ giống chuỗi để tự kết luận hai issue tương đương về pháp lý. Semantic duplication và atomicity do Judge đánh giá.
 
@@ -274,7 +278,7 @@ head -n 5 output/rejected_cases.jsonl
 | Artifact | Nội dung |
 | --- | --- |
 | `rejected_cases.jsonl` | Vụ bị loại do chất lượng, số vòng thực tế, issues cuối, lý do và toàn bộ feedback history |
-| `audit/<case_id>.json` | Issues/feedback từng lần đánh giá, responses, assessments, missing facts, lựa chọn cuối, trạng thái, request IDs, latency, usage |
+| `audit/<case_id>.json` | Issues/feedback từng lần đánh giá, classification, scope_rubric, coverage_analysis, blind_discovery, blind_comparison, responses, assessments, missing facts, lựa chọn cuối, trạng thái, request IDs, latency, usage |
 | `audit/records.jsonl` | Một dòng/vụ, index, status, số issues, boolean, rounds, consensus, stop reason |
 | `audit/states.jsonl` | Lịch sử chuyển trạng thái qua các lần resume |
 | `audit/summary.json` | `total_input_records`, `selected_records`, `accepted`/`completed`, `rejected`, `failed`, `pending`, output count; issues trung bình trên vụ được nhận, situation errors của vụ được nhận, rounds trung bình, PASS/early stop/max rounds, contests/Judge changes, token usage, fingerprints, thinking thực tế |

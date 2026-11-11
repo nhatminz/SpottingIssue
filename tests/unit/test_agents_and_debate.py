@@ -146,7 +146,8 @@ async def test_cases_do_not_share_history(config,record):
 
 async def test_blind_discovery_separate_request(config,record):
     config.enable_blind_judge_discovery=True
-    controller=make_controller(config,[gen_data()],[{"issues":gen_data()["issues"]},judge_data()])
+    discovered=gen_data()["issues"];discovered[0]["issue_id"]="D1"
+    controller=make_controller(config,[gen_data()],[{"issues":discovered},judge_data(blind=True)])
     await controller.run(record)
     assert len(controller.judge.client.messages)==2
     blind=json.loads(controller.judge.client.messages[0][1]["content"])

@@ -8,5 +8,8 @@ Feedback contains error_code, action, issue_ids, and verified situation excerpts
 - DUPLICATE / NON_ATOMIC: assess semantic duplication and whether questions can be evaluated independently.
 - LOW_RELEVANCE: reassess relevance to the actual questions requiring resolution.
 - PREMATURE_CONCLUSION: express a question requiring legal resolution instead of asserting its answer.
+- SUPPORTING_FACT: integrate the supported material circumstance into the related core issue's decisive fact where appropriate, and remove its standalone issue.
+- ANCILLARY_ISSUE / OUT_OF_SCOPE: reassess whether situation establishes an independent disputed request or a distinctive legal determination, instead of an ordinary ancillary matter or a merely mentioned person/act.
+- UNSUPPORTED_ISSUE: remove or contest a legal question lacking sufficient support in situation; a fact's presence alone does not establish an independent legal issue.
 
 Revise only issues that need revision. Preserve issue_id for retained issues and assign new IDs when adding issues. ACCEPT must result in a corresponding correction or explain why the current version already satisfies the feedback. Do not treat feedback as new facts, and do not add facts absent from situation. Return the ENTIRE current issue list, including unchanged issues.

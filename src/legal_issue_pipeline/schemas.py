@@ -18,6 +18,10 @@ class ErrorCode(str, Enum):
     NON_ATOMIC = "NON_ATOMIC"
     LOW_RELEVANCE = "LOW_RELEVANCE"
     PREMATURE_CONCLUSION = "PREMATURE_CONCLUSION"
+    UNSUPPORTED_ISSUE = "UNSUPPORTED_ISSUE"
+    SUPPORTING_FACT = "SUPPORTING_FACT"
+    ANCILLARY_ISSUE = "ANCILLARY_ISSUE"
+    OUT_OF_SCOPE = "OUT_OF_SCOPE"
 
 
 class Issue(Structured):
@@ -55,6 +59,10 @@ class Feedback(Structured):
 
 class IssueReview(Structured):
     issue_id: str
+    classification: Literal["CORE", "SUPPORTING_FACT", "IRRELEVANT", "DUPLICATE"]
+    court_scope_confirmed: bool
+    markdown_evidence_quotes: list[str]
+    related_issue_ids: list[str]
     verdict: Literal["PASS", "REVISE", "REMOVE", "NEEDS_REVIEW"]
     error_codes: list[ErrorCode]
     explanation: str = Field(min_length=1,max_length=1500)
@@ -85,8 +93,38 @@ class SituationAudit(Structured):
     explanation: str = Field(min_length=1,max_length=1500)
 
 
+class EvaluationRubric(Structured):
+    legal_relevance: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
+    coverage: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
+    grounding: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
+    format: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
+    explanation: str = Field(min_length=1,max_length=1500)
+
+
+class CoverageItem(Structured):
+    coverage_id: str = Field(min_length=1)
+    issue_text: str = Field(min_length=10)
+    situation_evidence_quotes: list[str] = Field(min_length=1)
+    markdown_evidence_quotes: list[str] = Field(min_length=1)
+    court_scope_confirmed: bool
+    matched_issue_ids: list[str]
+
+
+class BlindComparison(Structured):
+    discovery_issue_id: str
+    disposition: Literal["MATCHED", "MISSING", "EXCLUDED", "NEEDS_REVIEW"]
+    coverage_issue_ids: list[str]
+    matched_issue_ids: list[str]
+    situation_evidence_quotes: list[str] = Field(min_length=1)
+    markdown_evidence_quotes: list[str]
+    explanation: str = Field(min_length=1,max_length=1500)
+
+
 class JudgeOutput(Structured):
     per_issue_reviews: list[IssueReview]
+    rubric: EvaluationRubric
+    coverage_analysis: list[CoverageItem]
+    blind_comparison: list[BlindComparison]
     error_codes: list[ErrorCode]
     feedback: str = Field(max_length=1500)
     suggested_missing_issues: list[Issue]

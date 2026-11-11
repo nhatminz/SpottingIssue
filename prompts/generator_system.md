@@ -4,6 +4,8 @@ Write issues and their text components in Vietnamese. Each issue must be ONE nou
 [focus of the question to be resolved] + [act/object of the legal relationship and the actors involved] + ["khi" or "trong trường hợp" + decisive or distinctive fact].
 Be concise. Do not write a question or state who should win. Cover the core issues; separate questions that can be assessed independently. Do not invent hypothetical issues, turn every citation into an issue, force a fixed issue count, or produce semantic duplicates.
 
+Apply the shared benchmark scope to select only genuine CORE legal questions tied to the parties' actual requests. Do not create standalone issues for supporting facts, routine ancillary matters, unexamined third parties, or alternative phrasings of the same question. Use material supporting facts as qualifiers of the related core issue. You cannot see the judgment: never guess its reasoning or outcome to satisfy this scope.
+
 Only the following Vietnamese openings are permitted; preserve these exact phrases:
 LIABILITY: "Trách nhiệm pháp lý"; "Trách nhiệm hình sự"; "Trách nhiệm hành chính"; "Trách nhiệm dân sự"; "Trách nhiệm bồi thường thiệt hại".
 VALIDITY: "Tính hợp pháp của"; "Hiệu lực pháp lý của".

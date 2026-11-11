@@ -7,6 +7,7 @@ from contextlib import ExitStack
 from ..agents.base_agent import reject_duplicate_keys
 from ..config import PipelineConfig
 from ..validators.output_validator import validate_output
+from ..validators.judge_validator import scope_rubric_passes
 from .jsonl_reader import JSONLReader
 from .jsonl_writer import JSONLWriter
 
@@ -22,6 +23,7 @@ class ResultExporter:
         if (row["status"] != "COMPLETED" or row["output"] is None
             or audit.get("consensus") != "PASS" or audit.get("required_validations_passed") is not True
             or judge.get("overall_verdict") != "PASS" or judge.get("unresolved_disputes")
+            or not scope_rubric_passes(judge)
             or judge.get("error_codes") or judge.get("generator_visible_feedback") or judge.get("suggested_missing_issues")
             or any(r.get("verdict") != "PASS" or r.get("error_codes") for r in judge.get("per_issue_reviews",[]))
             or audit.get("final_issues") != row["output"].get("issues")):

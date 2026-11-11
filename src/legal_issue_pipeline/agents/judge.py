@@ -1,6 +1,8 @@
 from __future__ import annotations
 from ..schemas import DiscoveryOutput, GeneratorOutput, JudgeOutput, SafeAssessment, SafeFeedback
 from ..validators.evidence_validator import validate_quotes
+from ..validators.format_validator import candidate_errors
+from ..validators.judge_validator import scope_rubric_passes
 from .base_agent import BaseAgent
 
 
@@ -44,19 +46,32 @@ class JudgeAgent(BaseAgent):
     def __init__(self, client, config):
         super().__init__(client, config, "judge_system.md")
         self.reconsideration_prompt = (config.prompt_dir/"judge_reconsideration.md").read_text(encoding="utf-8")
+        self.blind_system_prompt = (config.prompt_dir/"judge_blind_discovery.md").read_text(encoding="utf-8")
 
     @staticmethod
     def sources(record: dict) -> dict:
         return {k: record.get(k, [] if k.startswith("citations") else "") for k in ["situation", "markdown", "citations_law", "citations"]}
 
-    async def discover(self, record: dict) -> DiscoveryOutput:
+    async def discover(self, situation: str) -> DiscoveryOutput:
+        # Stage A cannot accept a record, Generator output, or either role's history.
+        if not isinstance(situation,str):
+            raise TypeError("Blind discovery accepts only the situation string")
         def validate(output):
             for issue in output.issues:
-                validate_quotes(issue.situation_evidence_quotes, record["situation"], "blind discovery")
-        return await self.infer({**self.sources(record), "task": "BLIND_DISCOVERY: independently discover situation-supported issues, without seeing Generator output"}, DiscoveryOutput, validate=validate)
+                validate_quotes(issue.situation_evidence_quotes, situation, "blind discovery")
+                if issue.importance != "CORE":
+                    raise ValueError("Blind discovery must propose core issues only")
+            errors = candidate_errors(GeneratorOutput(issues=output.issues,responses_to_feedback=[]),situation,self.config)
+            if errors:
+                raise ValueError("Invalid blind discovery: "+"; ".join(errors))
+        # infer() always constructs fresh messages; message_history is a trace only.
+        return await self.infer({"situation":situation},DiscoveryOutput,validate=validate,
+                                system_prompt_override=self.blind_system_prompt)
 
     async def evaluate(self, record: dict, current: GeneratorOutput, previous: JudgeOutput | None,
                        discovery: DiscoveryOutput | None, mechanical_errors: list[str], debate_history: list[dict]) -> JudgeOutput:
+        if self.config.enable_blind_judge_discovery and discovery is None:
+            raise ValueError("Stage B requires the completed independent blind discovery")
         payload = {**self.sources(record), "current_candidate": current.model_dump(mode="json"),
                    "previous_judgment": previous.model_dump(mode="json") if previous else None,
                    "blind_discovery": discovery.model_dump(mode="json") if discovery else None,
@@ -65,9 +80,10 @@ class JudgeAgent(BaseAgent):
                    "situation_audit_enabled": self.config.enable_situation_audit,
                    "situation_error_policy": self.config.situation_error_policy}
         return await self.infer(payload, JudgeOutput, self.reconsideration_prompt if previous else "",
-                                validate=lambda output: self.validate_judgment(output, record, current, previous))
+                                validate=lambda output: self.validate_judgment(output, record, current, previous, discovery))
 
-    def validate_judgment(self, output: JudgeOutput, record: dict, current: GeneratorOutput, previous: JudgeOutput | None) -> None:
+    def validate_judgment(self, output: JudgeOutput, record: dict, current: GeneratorOutput, previous: JudgeOutput | None,
+                          discovery: DiscoveryOutput | None = None) -> None:
         ids = {i.issue_id for i in current.issues}
         reviews = [r.issue_id for r in output.per_issue_reviews]
         if set(reviews) != ids or len(reviews) != len(ids):
@@ -75,12 +91,54 @@ class JudgeAgent(BaseAgent):
         feedback_ids = [f.feedback_id for f in output.generator_visible_feedback]
         if len(set(feedback_ids)) != len(feedback_ids):
             raise ValueError("Duplicate feedback ID")
+        core_ids = {r.issue_id for r in output.per_issue_reviews if r.classification == "CORE"}
         for review in output.per_issue_reviews:
             validate_quotes(review.situation_evidence_quotes, record["situation"], "issue review")
+            validate_quotes(review.markdown_evidence_quotes,record["markdown"],"court scope",required=review.verdict=="PASS")
+            if set(review.related_issue_ids) - (ids-{review.issue_id}):
+                raise ValueError("Related issue IDs must refer to other current issues")
+            if review.classification != "CORE":
+                if review.verdict == "PASS" or not review.error_codes:
+                    raise ValueError("Only CORE issues may PASS; non-core reviews need a specific error code")
+                if not any(review.issue_id in f.issue_ids for f in output.generator_visible_feedback):
+                    raise ValueError("Non-core issue needs actionable situation-grounded feedback")
+            if review.classification == "DUPLICATE" and not (set(review.related_issue_ids)&core_ids):
+                raise ValueError("Duplicate review must identify the related core issue")
+            if review.classification == "SUPPORTING_FACT" and set(review.related_issue_ids)-core_ids:
+                raise ValueError("Supporting facts must be associated with core issues")
+            if review.classification == "SUPPORTING_FACT":
+                if not any(f.error_code.value=="SUPPORTING_FACT" and review.issue_id in f.issue_ids
+                           and f.action in ["REVISE","REMOVE","RECONSIDER"] for f in output.generator_visible_feedback):
+                    raise ValueError("Supporting fact requires explicit integration/removal feedback")
             if review.verdict == "PASS" and review.error_codes:
                 raise ValueError("Passing issue cannot have error codes")
+            if review.verdict == "PASS" and not review.court_scope_confirmed:
+                raise ValueError("Passing issue requires confirmed independent court scope")
+        coverage = {c.coverage_id:c for c in output.coverage_analysis}
+        if len(coverage) != len(output.coverage_analysis):
+            raise ValueError("Duplicate coverage ID")
+        for item in output.coverage_analysis:
+            validate_quotes(item.situation_evidence_quotes,record["situation"],"coverage situation")
+            validate_quotes(item.markdown_evidence_quotes,record["markdown"],"coverage court scope")
+            if set(item.matched_issue_ids)-core_ids:
+                raise ValueError("Coverage may match only current CORE issue IDs")
+        gaps = {c.coverage_id for c in output.coverage_analysis if c.court_scope_confirmed and not c.matched_issue_ids}
+        suggested_ids = [i.issue_id for i in output.suggested_missing_issues]
+        if set(suggested_ids) != gaps or len(set(suggested_ids)) != len(suggested_ids):
+            raise ValueError("Suggested missing issues must exactly identify confirmed coverage gaps by coverage_id")
         for issue in output.suggested_missing_issues:
             validate_quotes(issue.situation_evidence_quotes, record["situation"], "missing issue")
+            if issue.importance != "CORE":
+                raise ValueError("Only core missing issues may be requested")
+        if gaps:
+            if output.rubric.coverage == "PASS":
+                raise ValueError("Coverage cannot PASS while confirmed core issues are missing")
+            if not any(f.error_code.value=="MISSING_CORE_ISSUE" and f.action=="ADD" for f in output.generator_visible_feedback):
+                raise ValueError("Coverage gap requires ADD feedback grounded in situation")
+        for review in output.per_issue_reviews:
+            if review.classification=="SUPPORTING_FACT" and not review.related_issue_ids and not gaps:
+                raise ValueError("Associate supporting facts with a current or missing core issue")
+        self._validate_blind_comparison(output,record,discovery,coverage,core_ids,gaps)
         for finding in output.situation_audit.missing_facts + output.situation_audit.contradictions:
             validate_quotes(finding.markdown_evidence_quotes, record["markdown"], "situation audit")
         FeedbackFirewall.project(output, record["situation"], current)
@@ -93,8 +151,30 @@ class JudgeAgent(BaseAgent):
             if (output.error_codes or output.generator_visible_feedback or output.suggested_missing_issues
                 or output.unresolved_disputes or any(r.verdict != "PASS" or r.error_codes for r in output.per_issue_reviews)):
                 raise ValueError("PASS contradicts unresolved errors, coverage gaps, or disputes")
+            if not scope_rubric_passes(output):
+                raise ValueError("PASS requires Legal Relevance, Coverage, Grounding, Format and CORE court-scope evidence")
         elif not output.generator_visible_feedback and not output.situation_audit.needs_review and not output.unresolved_disputes:
             raise ValueError("Non-PASS requires actionable feedback or explicit uncertainty/dispute")
+
+    @staticmethod
+    def _validate_blind_comparison(output, record, discovery, coverage, core_ids, gaps):
+        expected = {i.issue_id for i in discovery.issues} if discovery else set()
+        actual = [c.discovery_issue_id for c in output.blind_comparison]
+        if set(actual) != expected or len(actual) != len(expected):
+            raise ValueError("Compare every blind discovery issue exactly once; never invent discovery IDs")
+        for comparison in output.blind_comparison:
+            validate_quotes(comparison.situation_evidence_quotes,record["situation"],"blind comparison")
+            validate_quotes(comparison.markdown_evidence_quotes,record["markdown"],"blind comparison court",required=False)
+            refs = set(comparison.coverage_issue_ids)
+            matches = set(comparison.matched_issue_ids)
+            if refs-coverage.keys() or matches-core_ids:
+                raise ValueError("Invalid blind comparison coverage/core references")
+            if comparison.disposition=="MATCHED":
+                supported = set().union(*(set(coverage[c].matched_issue_ids) for c in refs))
+                if not refs or not matches or not matches <= supported:
+                    raise ValueError("MATCHED blind discovery needs an evidence-backed coverage match")
+            elif comparison.disposition=="MISSING" and (not refs or not refs <= gaps or matches):
+                raise ValueError("MISSING blind discovery must reference an unmatched confirmed core issue")
 
 
 def situation_error(judgment: JudgeOutput, policy: str) -> bool:

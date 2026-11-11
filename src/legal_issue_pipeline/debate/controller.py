@@ -6,6 +6,7 @@ from ..config import PipelineConfig
 from ..llm.base_client import LLMError
 from ..schemas import GeneratorOutput
 from ..validators.format_validator import candidate_errors
+from ..validators.judge_validator import scope_rubric_passes, RUBRIC_CRITERIA
 from .state import CaseStatus, DebateResult, EvaluatedCandidate
 from .stopping import StagnationDetector
 
@@ -14,6 +15,7 @@ class DebateController:
     def __init__(self, generator: GeneratorAgent, judge: JudgeAgent, config: PipelineConfig):
         self.generator, self.judge, self.config = generator, judge, config
         self.trace: list[dict] = []
+        self.blind_discovery = None
 
     def _required_validations_passed(self, candidate: EvaluatedCandidate) -> bool:
         return (not candidate.errors and not candidate.judgment.situation_audit.needs_review
@@ -26,6 +28,7 @@ class DebateController:
         # situation_error is deliberately independent of the acceptance gate.
         return (self._required_validations_passed(candidate)
                 and candidate.judgment.overall_verdict == "PASS"
+                and scope_rubric_passes(candidate.judgment)
                 and not candidate.judgment.unresolved_disputes)
 
     def _select(self, candidates: list[EvaluatedCandidate]) -> EvaluatedCandidate:
@@ -50,8 +53,9 @@ class DebateController:
 
     async def run(self, record: dict) -> DebateResult:
         start = time.monotonic()
+        discovery = await self.judge.discover(record["situation"]) if self.config.enable_blind_judge_discovery else None
+        self.blind_discovery = discovery
         current = await self.generator.generate(record["situation"])
-        discovery = await self.judge.discover(record) if self.config.enable_blind_judge_discovery else None
         previous = None
         candidates = []
         own_history: list[dict] = []
@@ -106,6 +110,10 @@ class DebateController:
         if not approved:
             if final.judgment.overall_verdict != "PASS":
                 rejection_reasons.append(f"Judge final verdict: {final.judgment.overall_verdict}")
+            for criterion in RUBRIC_CRITERIA:
+                value = getattr(final.judgment.rubric,criterion)
+                if value != "PASS":
+                    rejection_reasons.append(f"Rubric {criterion}: {value}")
             if not self._required_validations_passed(final):
                 rejection_reasons.append("Required validation disabled, failed, or situation audit uncertain")
             rejection_reasons.extend(final.judgment.unresolved_disputes)
@@ -134,6 +142,9 @@ class DebateController:
                  "selection_policy": self.config.finalize_policy,
                  "selection_is_heuristic": not approved,
                  "blind_discovery": discovery.model_dump(mode="json") if discovery else None,
+                 "blind_comparison": final.judgment.model_dump(mode="json")["blind_comparison"],
+                 "scope_rubric": final.judgment.rubric.model_dump(mode="json"),
+                 "coverage_analysis": final.judgment.model_dump(mode="json")["coverage_analysis"],
                  "history": self.trace if self.config.save_debate_history else [],
                  "requests": {"generator": self.generator.request_metrics, "judge": self.judge.request_metrics}}
         # A best-valid candidate may be kept privately, but rejected exports must

@@ -73,7 +73,7 @@ class PipelineConfig(BaseModel):
     enable_early_stop: bool = True
     enable_generator_rebuttal: bool = True
     enable_judge_reconsideration: bool = True
-    enable_blind_judge_discovery: bool = False
+    enable_blind_judge_discovery: bool = True
     stop_on_stagnation: bool = True
     max_stagnant_rounds: int = Field(2, ge=1)
     finalize_policy: Literal["best_valid", "last_valid"] = "best_valid"

@@ -25,7 +25,8 @@ log = logging.getLogger(__name__)
 
 def create_manifest(config: PipelineConfig, input_hash: str) -> dict:
     prompt_hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(config.prompt_dir.glob("*.md"))}
-    if not {"generator_system.md", "generator_revision.md", "judge_system.md", "judge_reconsideration.md"} <= prompt_hashes.keys():
+    if not {"generator_system.md", "generator_revision.md", "judge_system.md", "judge_reconsideration.md",
+            "benchmark_scope.md", "judge_blind_discovery.md"} <= prompt_hashes.keys():
         raise ValueError("Missing required prompt files")
     source_root = Path(__file__).resolve().parents[1]
     code_hash = digest({str(p.relative_to(source_root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(source_root.rglob("*.py"))})
@@ -104,6 +105,7 @@ class PipelineRunner:
                     if key and key != "EMPTY":
                         error = error.replace(key, "<redacted>")
                 audit = {"case_id": record.case_id, "input_index": record.index,"doc_name":record.data["doc_name"],"status": "FAILED", "error": error,
+                         "blind_discovery":controller.blind_discovery.model_dump(mode="json") if controller and controller.blind_discovery else None,
                          "history": getattr(controller,"trace",[]) if self.config.save_debate_history else [],
                          "api_calls": {role: getattr(getattr(controller, name, None).client, "calls", [])
                                        for role,name in [("generator","generator"),("judge","judge")]} if controller else {},
