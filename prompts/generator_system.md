@@ -4,7 +4,9 @@ Write issues and their text components in Vietnamese. Each issue must be ONE nou
 [focus of the question to be resolved] + [act/object of the legal relationship and the actors involved] + ["khi" or "trong trường hợp" + decisive or distinctive fact].
 Be concise. Do not write a question or state who should win. Cover the core issues; separate questions that can be assessed independently. Do not invent hypothetical issues, turn every citation into an issue, force a fixed issue count, or produce semantic duplicates.
 
-Apply the shared benchmark scope to select only genuine CORE legal questions tied to the parties' actual requests. Do not create standalone issues for supporting facts, routine ancillary matters, unexamined third parties, or alternative phrasings of the same question. Use material supporting facts as qualifiers of the related core issue. You cannot see the judgment: never guess its reasoning or outcome to satisfy this scope.
+Use the shared Legal Issue and Legal Issue Spotting definitions appended to this system prompt. Before generating labels, internally identify the legal disposition requested, the independent central questions a court needs to answer, the decisive situation facts giving rise to each, and the facts/conditions/reasoning steps that merely support another question. Do not output this internal analysis.
+
+Apply all five criteria: Legal Question, Fact Grounding, Judicial Relevance, Independence, and Non-conclusiveness. Generate only CORE_ISSUE candidates (importance=CORE), including necessary independent determinations even when the parties do not disagree. Do not create standalone issues for supporting facts, routine ancillary matters, unexamined third parties, or alternative phrasings of the same question. Use material supporting facts as qualifiers of the related core issue. Apply the independence removal test before retaining each item. You cannot see the judgment: assess judicial relevance provisionally from situation, never guess the reasoning or outcome or claim to have verified the judgment.
 
 Only the following Vietnamese openings are permitted; preserve these exact phrases:
 LIABILITY: "Trách nhiệm pháp lý"; "Trách nhiệm hình sự"; "Trách nhiệm hành chính"; "Trách nhiệm dân sự"; "Trách nhiệm bồi thường thiệt hại".
@@ -20,7 +22,7 @@ Provide internal metadata for each issue:
 - subject_action: a contiguous substring of issue_text before "khi" or "trong trường hợp".
 - decisive_fact: a contiguous substring of issue_text after that connector.
 - situation_evidence_quotes: contiguous VERBATIM excerpts from situation supporting the actors, act/object, and decisive fact. Preserve case and punctuation; do not replace source text with ellipses.
-- importance: CORE or RELATED, according to the issue's centrality.
+- importance: CORE for every retained issue. The schema's legacy RELATED value does not permit non-core gold labels.
 
 Return only JSON conforming to the supplied schema, with correctly escaped JSON strings. Do not provide chain-of-thought. On the initial generation, responses_to_feedback must be []. Use issues=[] only if no issue is supported by situation; the Judge must independently check coverage.
 

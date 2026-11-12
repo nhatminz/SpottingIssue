@@ -1,5 +1,7 @@
 # Rubric CORE và blind discovery độc lập
 
+Bổ sung hiện tại: định nghĩa học thuật, năm tiêu chí CORE, phép kiểm tra tính độc lập và adapter vLLM được ghi tại [academic_scope_vllm.md](academic_scope_vllm.md). CORE có thể là vấn đề cần Tòa xác định độc lập dù các bên không tranh chấp; bốn trường rubric và schemas vẫn giữ nguyên.
+
 Bản cập nhật chỉ tập trung scope, đánh giá Judge và blind discovery. Model/endpoint DeepSeek, token budget 131073 cho mỗi request của mỗi agent, số vòng từ shell, debate hai chiều, API retries, checkpoint/resume và schema output chính được giữ nguyên. `ENABLE_BLIND_JUDGE_DISCOVERY` đổi default thành true theo yêu cầu.
 
 ## Điều kiện nhận gold

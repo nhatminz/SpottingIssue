@@ -6,6 +6,8 @@ Project trích xuất vấn đề pháp lý từ `situation`, dùng Generator v�
 
 **Rubric hiện tại:** chỉ CORE thuộc nội dung Tòa trực tiếp giải quyết được làm gold. Judge phải xác nhận Legal Relevance, Coverage, Grounding và Format; blind discovery mặc định bật và chỉ nhận situation. Chi tiết thay đổi, kiểm chứng và lệnh chạy bằng run mới ở [docs/strict_scope.md](docs/strict_scope.md). Các báo cáo Qwen trước đây phản ánh rubric cũ.
 
+Định nghĩa hiện tại dùng chung năm tiêu chí: Legal Question, Fact Grounding, Judicial Relevance, Independence và Non-conclusiveness. CORE không đòi hỏi các bên phải tranh chấp; Judge loại tiền đề/bước lập luận dù được nêu trong nhận định Tòa. Bản triển khai vLLM có bốn mức effort và budget số 1–100, mặc định `xhigh=75`; script production cho tối đa 60 vụ/60 requests đồng thời, batch 100. Xem [docs/academic_scope_vllm.md](docs/academic_scope_vllm.md).
+
 ## 1. Chạy trên B200 với endpoint đã serve
 
 Project root mặc định là `/workspace/storage-shared/nlp/minhpn19/LegalDataset`. Script đã trỏ cả Generator và Judge tới `http://172.29.62.173:8000/v1`, model ID `DeepSeek-V4.1-Flash-1017`. **Client chỉ gọi HTTP, không cần GPU/CUDA/PyTorch hoặc weights model local.** Nếu chưa có environment, cài Python >=3.10 và `.venv/bin/python -m pip install -e .` trong một venv mới tại B200. Chi tiết setup, đường dẫn và giải thích workers/concurrency/token budgets ở [docs/B200.md](docs/B200.md).
@@ -102,12 +104,12 @@ cd /workspace/storage-shared/nlp/minhpn19/LegalDataset
 GEN_API_BASE=http://172.29.62.173:8000/v1 \
 JUDGE_API_BASE=http://172.29.62.173:8000/v1 \
 GEN_MODEL=DeepSeek-V4.1-Flash-1017 JUDGE_MODEL=DeepSeek-V4.1-Flash-1017 \
-GEN_BACKEND=deepseek JUDGE_BACKEND=deepseek \
+GEN_BACKEND=deepseek_vllm JUDGE_BACKEND=deepseek_vllm \
 GEN_API_KEY_FILE=/secure/generator.key \
 JUDGE_API_KEY_FILE=/secure/judge.key \
-MAX_WORKERS=2 MAX_CONCURRENT_REQUESTS=2 BATCH_SIZE=8 \
+MAX_WORKERS=60 MAX_CONCURRENT_REQUESTS=60 BATCH_SIZE=100 \
 GEN_THINKING_ENABLED=true JUDGE_THINKING_ENABLED=true \
-GEN_THINKING_EFFORT=extra_high JUDGE_THINKING_EFFORT=extra_high \
+GEN_THINKING_EFFORT=xhigh JUDGE_THINKING_EFFORT=xhigh \
 MAX_DEBATE_ROUNDS=8 \
 bash scripts/run_pipeline.sh
 ```
@@ -153,19 +155,20 @@ GPU của server được chọn lúc host server. Đặt `CUDA_VISIBLE_DEVICES`
 
 ## 5. Thinking và structured output
 
-DeepSeek adapter gửi `thinking.type=enabled/disabled`; khi bật gửi `reasoning_effort`. Mapping của pipeline:
+Production dùng `GEN_BACKEND=deepseek_vllm` và `JUDGE_BACKEND=deepseek_vllm`, dành cho DeepSeek V4.1 host bằng vLLM. Adapter gửi `chat_template_kwargs.thinking` và budget **số nguyên** `chat_template_kwargs.reasoning_effort`:
 
-| Giá trị shell | DeepSeek gửi thực tế |
+| Giá trị shell | Budget vLLM gửi thực tế |
 | --- | --- |
-| `low` | `low` |
-| `medium` | `high` (không phải mức tính toán riêng) |
-| `high` | `high` |
-| `extra_high` | `max` (alias riêng của pipeline) |
-| `max` | `max` |
+| `low` | 25 |
+| `high` | 50 |
+| `xhigh` | 75 |
+| `max` | 100 |
+| Số nguyên 1–100, ví dụ `63` | 63 |
+| `extra_high` | 100 (alias cũ của pipeline, có warning) |
 
-Các alias luôn có warning và thông số thực được ghi trong audit/summary. Adapter mặc định không gửi temperature/top_p/seed khi DeepSeek thinking bật; nếu bạn đặt chúng sẽ có warning rằng bị bỏ qua. Đây là chính sách thận trọng cho nhiều self-hosted variants. DeepSeek Flash có phiên bản hỗ trợ top_p trong thinking; nếu đã xác nhận server, có thể opt-in rõ bằng `GEN_EXTRA_BODY='{"top_p":0.95}'` và `JUDGE_EXTRA_BODY` tương ứng. Không giả định tham số có hiệu lực chỉ vì server nhận HTTP 200.
+`*_THINKING_ENABLED=false` hoặc `*_THINKING_EFFORT=none` tắt thinking. `medium` và `minimal` không hợp lệ ở vLLM; mặc định fail rõ ở preflight. Budget effort 75 không phải giới hạn 75 tokens: `*_MAX_OUTPUT_TOKENS` vẫn là giới hạn sinh token riêng. Sampling `null` không gửi; adapter vLLM gửi temperature/top_p/seed nếu bạn cấu hình. Audit/summary lưu cả effort hiệu lực và budget thực trong template kwargs; không lưu reasoning_content.
 
-`GEN_SUPPORTED_EFFORTS`/`JUDGE_SUPPORTED_EFFORTS` mô tả mức server đã được bạn xác nhận hỗ trợ. Với mức không nằm trong danh sách: `THINKING_UNSUPPORTED_POLICY=fail` báo lỗi; `fallback` dùng `*_FALLBACK_EFFORT` có warning. Server vẫn có thể từ chối request: HTTP 400 dừng rõ ràng, không tự đoán fallback hoặc tắt kiểm tra JSON. Khi đổi adapter/server cần kiểm tra request compatibility trên run riêng.
+`GEN_SUPPORTED_EFFORTS`/`JUDGE_SUPPORTED_EFFORTS` giới hạn các alias tier được phép; vLLM còn nhận budget số 1–100. `THINKING_UNSUPPORTED_POLICY=fail` báo lỗi; `fallback` dùng `*_FALLBACK_EFFORT` có warning. Server vẫn có thể từ chối request: HTTP 400 dừng rõ ràng, không tự đoán fallback hoặc tắt kiểm tra JSON. Nếu dùng **hosted DeepSeek API**, chọn backend `deepseek` và đặt effort `low/high/max` hoặc alias cũ `extra_high -> max`, `medium -> high`. Adapter đó giữ cách gửi top-level `thinking.type`/`reasoning_effort` và chính sách sampling thận trọng cũ. Không dùng tier API để suy ra budget vLLM: theo recipe, API low/high/max tương ứng 50/75/100, còn vLLM low/high/xhigh/max là 25/50/75/100.
 
 Qwen generic dùng `chat_template_kwargs.enable_thinking`; mặc định smoke `*_THINKING_ENABLED=false`, `*_THINKING_EFFORT=none`. Để bật Qwen:
 
@@ -184,7 +187,7 @@ Giới hạn context được kiểm tra trước request. Nếu có `TOKENIZER_
 
 Production mặc định `GEN_MAX_OUTPUT_TOKENS=131073` và `JUDGE_MAX_OUTPUT_TOKENS=131073` **riêng cho mỗi request ở mỗi vòng**, không chia sẻ hoặc trừ dần giữa các lượt/agent. `MAX_CONTEXT_TOKENS=262144` là guard cho input + output của từng request, chừa chỗ cho `MAX_INPUT_TOKENS=100000`. Server phải hỗ trợ ngân sách này; cấu hình client không tự tăng giới hạn server.
 
-Tài liệu tham khảo chính thức: [DeepSeek thinking](https://api-docs.deepseek.com/guides/thinking_mode/), [Qwen vLLM](https://github.com/QwenLM/Qwen3/blob/main/docs/source/deployment/vllm.md), [vLLM structured outputs](https://docs.vllm.ai/en/stable/features/structured_outputs/).
+Tài liệu tham khảo chính thức: [vLLM DeepSeek V4.1 recipe](https://recipes.vllm.ai/deepseek-ai/DeepSeek-V4.1-Flash), [DeepSeek thinking API](https://api-docs.deepseek.com/guides/thinking_mode/), [Qwen vLLM](https://github.com/QwenLM/Qwen3/blob/main/docs/source/deployment/vllm.md), [vLLM structured outputs](https://docs.vllm.ai/en/stable/features/structured_outputs/).
 
 ## 6. Kiến trúc và quyền truy cập
 

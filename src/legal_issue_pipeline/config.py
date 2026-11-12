@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, StrictInt, field_validator, model_validator
 
 
 class AgentConfig(BaseModel):
@@ -17,13 +17,13 @@ class AgentConfig(BaseModel):
     api_base: str = "http://172.29.62.173:8000/v1"
     api_key: SecretStr = SecretStr("EMPTY")
     model: str = "DeepSeek-V4.1-Flash-1017"
-    backend: Literal["deepseek", "generic"] = "deepseek"
+    backend: Literal["deepseek_vllm", "deepseek", "generic"] = "deepseek_vllm"
     thinking_enabled: bool = True
-    thinking_effort: str = "extra_high"
+    thinking_effort: str | StrictInt = "xhigh"
     # Generic Qwen supports a switch, not a guaranteed compute-effort dial.
     generic_thinking_style: Literal["qwen", "reasoning_effort", "none"] = "qwen"
-    supported_efforts: list[str] = Field(default_factory=lambda: ["low", "high", "max"])
-    fallback_effort: str = "high"
+    supported_efforts: list[str] = Field(default_factory=lambda: ["low", "high", "xhigh", "max"])
+    fallback_effort: str | StrictInt = "high"
     structured_output_mode: Literal["json_object", "json_schema"] = "json_object"
     max_output_tokens: int = Field(131073, ge=64)
     temperature: float | None = None
@@ -33,6 +33,14 @@ class AgentConfig(BaseModel):
     max_retries: int = Field(3, ge=0, le=20)
     extra_body: dict = Field(default_factory=dict)
     stop: list[str] = Field(default_factory=list)
+
+    @field_validator("thinking_effort", "fallback_effort", mode="before")
+    @classmethod
+    def numeric_effort(cls, value):
+        # Environment variables are strings; vLLM's numeric budget must be an int in JSON.
+        if isinstance(value, str) and value.isascii() and value.isdecimal():
+            return int(value)
+        return value
 
     @model_validator(mode="after")
     def validate_endpoint(self):

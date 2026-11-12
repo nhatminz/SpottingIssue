@@ -18,6 +18,7 @@ from ..io.jsonl_reader import JSONLReader, InputRecord
 from ..io.jsonl_writer import JSONLWriter, atomic_text
 from ..io.result_exporter import ResultExporter
 from ..llm.client_factory import ClientFactory
+from ..llm.adapters import adapter_for
 from ..validators.output_validator import make_output
 
 log = logging.getLogger(__name__)
@@ -51,6 +52,15 @@ class PipelineRunner:
             yield record
 
     def preflight(self) -> dict:
+        # Catch unsupported thinking settings before creating checkpoints or starting any case.
+        for role in ["gen", "judge"]:
+            try:
+                agent = getattr(self.config, role)
+                _, effective = adapter_for(agent).parameters(agent, self.config)
+            except ValueError as exc:
+                raise ValueError(f"{role} configuration: {exc}") from None
+            log.info("%s backend=%s thinking=%s requested_effort=%s effective_effort=%s", role, agent.backend,
+                     effective["thinking_enabled"], effective["requested_effort"], effective["effective_effort"])
         reader = JSONLReader(self.config.input_path)
         # Full schema validation occurs before any expensive inference or output mutation.
         total = sum(1 for _ in reader)

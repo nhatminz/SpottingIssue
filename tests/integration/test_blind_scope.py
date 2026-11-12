@@ -157,7 +157,8 @@ async def test_completed_blind_discovery_is_audited_even_when_generator_fails(co
     assert json.loads(case.read_text())["blind_discovery"]==discovery_data()
 
 
-@pytest.mark.parametrize("filename",["benchmark_scope.md","judge_blind_discovery.md"])
+@pytest.mark.parametrize("filename",["benchmark_scope.md","judge_blind_discovery.md","generator_system.md",
+                                     "judge_system.md","generator_revision.md","judge_reconsideration.md"])
 async def test_new_scope_prompts_participate_in_resume_fingerprint(config,record,tmp_path,filename):
     config.enable_blind_judge_discovery=True
     directory=tmp_path/"prompts";shutil.copytree(config.prompt_dir,directory);config.prompt_dir=directory
@@ -190,6 +191,8 @@ async def test_http_smoke_three_independent_requests_and_unchanged_output_schema
             assert payload=={"situation":record["situation"]}
             stages.append("generate");answer=gen_data()
         assert body["max_tokens"]==131073
+        assert body["chat_template_kwargs"]=={"thinking":True,"reasoning_effort":75}
+        assert "reasoning_effort" not in body and "thinking" not in body
         return httpx.Response(200,json={"choices":[{"message":{"content":json.dumps(answer)},"finish_reason":"stop"}],
             "usage":{"total_tokens":40}})
     def factory():
@@ -204,3 +207,4 @@ async def test_http_smoke_three_independent_requests_and_unchanged_output_schema
     for key in record:
         if key not in ["issues","situation_error"]:assert result[key]==record[key]
     assert summary["token_usage"]["total_tokens"]==120
+    assert summary["effective_thinking"]["judge"]["actual_parameters"]["chat_template_kwargs"]["reasoning_effort"]==75

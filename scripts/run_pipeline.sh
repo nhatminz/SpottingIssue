@@ -29,12 +29,13 @@ export OVERWRITE_OUTPUT="${OVERWRITE_OUTPUT:-false}"
 # Giữ biến caller đã đặt; mặc định rỗng. TOKENIZER_PATH rỗng => không cần Torch.
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES-}"
 # Số bản án được xử lý đồng thời; một worker giữ một vụ qua toàn bộ debate.
-export MAX_WORKERS="${MAX_WORKERS:-1}"
+export MAX_WORKERS="${MAX_WORKERS:-60}"
 # Tổng số HTTP inference requests đang chờ response, tính chung Generator/Judge.
-export MAX_CONCURRENT_REQUESTS="${MAX_CONCURRENT_REQUESTS:-1}"
+export MAX_CONCURRENT_REQUESTS="${MAX_CONCURRENT_REQUESTS:-60}"
 # Số bản án trong một đợt; xong cả đợt mới đưa đợt kế tiếp vào xử lý.
 # Không phải batch GPU/token của server. Nên >= MAX_WORKERS để tận dụng workers.
-export BATCH_SIZE="${BATCH_SIZE:-8}"
+# 100 vụ/đợt: tối đa 60 vụ chạy, các vụ còn lại chờ và lấp chỗ worker vừa xong.
+export BATCH_SIZE="${BATCH_SIZE:-100}"
 # Index bản ghi đầu tiên trong INPUT (0-based): 0=dòng 1; 100=dòng 101.
 export START_INDEX="${START_INDEX:-0}"
 # Số bản ghi INPUT được chọn từ START_INDEX; 0=đến cuối file.
@@ -43,14 +44,18 @@ export LIMIT="${LIMIT:-0}"
 export RANDOM_SEED="${RANDOM_SEED:-42}"
 
 # Generator: endpoint/API model ID riêng. Secret file chỉ dùng khi API_KEY rỗng.
-# null = không gửi sampling parameter. extra_high -> max; medium -> high ở DeepSeek.
+# deepseek_vllm: chat_template_kwargs; low=25, high=50, xhigh=75, max=100.
+# Có thể đặt số nguyên 1–100; đây là effort budget, không phải số token.
+# medium/minimal không hợp lệ ở vLLM. extra_high là alias cũ của pipeline -> max.
+# deepseek dành riêng cho hosted API với cách ánh xạ tier khác; generic cho Qwen.
+# null = không gửi sampling parameter. THINKING_ENABLED=false hoặc EFFORT=none để tắt.
 export GEN_API_BASE="${GEN_API_BASE:-$DEEPSEEK_API_BASE}"
 export GEN_API_KEY="${GEN_API_KEY:-}"
 export GEN_API_KEY_FILE="${GEN_API_KEY_FILE:-}"
 export GEN_MODEL="${GEN_MODEL:-$DEEPSEEK_MODEL}"
-export GEN_BACKEND="${GEN_BACKEND:-deepseek}"
+export GEN_BACKEND="${GEN_BACKEND:-deepseek_vllm}"
 export GEN_THINKING_ENABLED="${GEN_THINKING_ENABLED:-true}"
-export GEN_THINKING_EFFORT="${GEN_THINKING_EFFORT:-extra_high}"
+export GEN_THINKING_EFFORT="${GEN_THINKING_EFFORT:-xhigh}"
 # Trần token SINH MỚI của MỖI request Generator, gửi thành max_tokens tới API.
 # Thinking + final JSON dùng budget này theo cách tính của backend.
 # Mỗi lượt có budget 131073 riêng; không trừ token đã dùng ở lượt trước.
@@ -61,7 +66,7 @@ export GEN_SEED="${GEN_SEED:-null}"
 export GEN_TIMEOUT="${GEN_TIMEOUT:-null}"
 export GEN_MAX_RETRIES="${GEN_MAX_RETRIES:-3}"
 export GEN_GENERIC_THINKING_STYLE="${GEN_GENERIC_THINKING_STYLE:-qwen}"
-export GEN_SUPPORTED_EFFORTS="${GEN_SUPPORTED_EFFORTS:-[\"low\",\"high\",\"max\"]}"
+export GEN_SUPPORTED_EFFORTS="${GEN_SUPPORTED_EFFORTS:-[\"low\",\"high\",\"xhigh\",\"max\"]}"
 export GEN_FALLBACK_EFFORT="${GEN_FALLBACK_EFFORT:-high}"
 export GEN_STRUCTURED_OUTPUT_MODE="${GEN_STRUCTURED_OUTPUT_MODE:-json_object}"
 export GEN_STOP="${GEN_STOP:-[]}"
@@ -73,9 +78,9 @@ export JUDGE_API_BASE="${JUDGE_API_BASE:-$DEEPSEEK_API_BASE}"
 export JUDGE_API_KEY="${JUDGE_API_KEY:-}"
 export JUDGE_API_KEY_FILE="${JUDGE_API_KEY_FILE:-}"
 export JUDGE_MODEL="${JUDGE_MODEL:-$DEEPSEEK_MODEL}"
-export JUDGE_BACKEND="${JUDGE_BACKEND:-deepseek}"
+export JUDGE_BACKEND="${JUDGE_BACKEND:-deepseek_vllm}"
 export JUDGE_THINKING_ENABLED="${JUDGE_THINKING_ENABLED:-true}"
-export JUDGE_THINKING_EFFORT="${JUDGE_THINKING_EFFORT:-extra_high}"
+export JUDGE_THINKING_EFFORT="${JUDGE_THINKING_EFFORT:-xhigh}"
 # Trần token SINH MỚI của MỖI request Judge; độc lập với budget của Generator.
 # Mỗi lượt có budget 131073 riêng; không chia sẻ với Generator hoặc các vòng khác.
 export JUDGE_MAX_OUTPUT_TOKENS="${JUDGE_MAX_OUTPUT_TOKENS:-131073}"
@@ -85,7 +90,7 @@ export JUDGE_SEED="${JUDGE_SEED:-null}"
 export JUDGE_TIMEOUT="${JUDGE_TIMEOUT:-null}"
 export JUDGE_MAX_RETRIES="${JUDGE_MAX_RETRIES:-3}"
 export JUDGE_GENERIC_THINKING_STYLE="${JUDGE_GENERIC_THINKING_STYLE:-qwen}"
-export JUDGE_SUPPORTED_EFFORTS="${JUDGE_SUPPORTED_EFFORTS:-[\"low\",\"high\",\"max\"]}"
+export JUDGE_SUPPORTED_EFFORTS="${JUDGE_SUPPORTED_EFFORTS:-[\"low\",\"high\",\"xhigh\",\"max\"]}"
 export JUDGE_FALLBACK_EFFORT="${JUDGE_FALLBACK_EFFORT:-high}"
 export JUDGE_STRUCTURED_OUTPUT_MODE="${JUDGE_STRUCTURED_OUTPUT_MODE:-json_object}"
 export JUDGE_STOP="${JUDGE_STOP:-[]}"

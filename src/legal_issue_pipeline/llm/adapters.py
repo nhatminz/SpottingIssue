@@ -61,3 +61,77 @@ class DeepSeekAdapter:
             else:
                 body[name] = value
         return body, effective
+
+
+class DeepSeekVLLMAdapter:
+    """DeepSeek V4.1's open-source encoder: four aliases or a 1..100 budget.
+
+    This is deliberately separate from the hosted DeepSeek API's tier mapping.
+    https://recipes.vllm.ai/deepseek-ai/DeepSeek-V4.1-Flash
+    """
+    tiers = {"low": 25, "high": 50, "xhigh": 75, "max": 100}
+
+    @classmethod
+    def validate_body(cls, body: dict) -> None:
+        """Check the final merged template options, including explicit extra-body overrides."""
+        kwargs = body.get("chat_template_kwargs", {})
+        if not isinstance(kwargs, dict):
+            raise ValueError("chat_template_kwargs must be an object")
+        switches = [kwargs[key] for key in ["thinking", "enable_thinking"] if key in kwargs]
+        if any(type(value) is not bool for value in switches) or len(set(switches)) > 1:
+            raise ValueError("vLLM thinking/enable_thinking must be booleans and must agree")
+        if "reasoning_effort" in kwargs:
+            value = kwargs["reasoning_effort"]
+            if not ((type(value) is int and 1 <= value <= 100) or
+                    (isinstance(value, str) and value in cls.tiers)):
+                raise ValueError("vLLM chat_template_kwargs.reasoning_effort must be a native tier or integer 1-100")
+        top_level = body.get("reasoning_effort")
+        if top_level is not None:
+            if not isinstance(top_level, str) or top_level not in {*cls.tiers, "none"}:
+                raise ValueError("vLLM top-level reasoning_effort must be none, low, high, xhigh, or max")
+            if switches and any(switches) != (top_level != "none"):
+                raise ValueError("vLLM top-level reasoning_effort conflicts with the thinking switch")
+            nested = kwargs.get("reasoning_effort")
+            if top_level != "none" and nested is not None and cls.tiers[top_level] != cls.tiers.get(nested, nested):
+                raise ValueError("vLLM top-level and template reasoning_effort must agree")
+
+    def _budget(self, value: str | int, agent: AgentConfig) -> int:
+        if value == "extra_high":
+            log.warning("thinking effort alias extra_high -> max (deepseek_vllm; legacy pipeline alias)")
+            value = "max"
+        if type(value) is int and 1 <= value <= 100:
+            return value
+        if isinstance(value, str) and value in self.tiers and value in agent.supported_efforts:
+            return self.tiers[value]
+        raise ValueError("DeepSeek vLLM effort must be low, high, xhigh, max, or an integer 1-100; "
+                         f"got {value!r} (supported aliases={agent.supported_efforts})")
+
+    def parameters(self, agent: AgentConfig, config: PipelineConfig) -> tuple[dict, dict]:
+        enabled = agent.thinking_enabled and agent.thinking_effort != "none"
+        if agent.thinking_enabled and not enabled:
+            log.warning("deepseek_vllm effort=none disables thinking")
+        budget = None
+        if enabled:
+            try:
+                budget = self._budget(agent.thinking_effort, agent)
+            except ValueError:
+                if config.thinking_unsupported_policy == "fail":
+                    raise
+                budget = self._budget(agent.fallback_effort, agent)
+                log.warning("Unsupported vLLM effort %s -> configured fallback %s (budget=%d)",
+                            agent.thinking_effort, agent.fallback_effort, budget)
+        kwargs = {"thinking": enabled}
+        if budget is not None:
+            kwargs["reasoning_effort"] = budget
+        body = {"chat_template_kwargs": kwargs}
+        # vLLM sampling parameters are independent of the numeric reasoning budget.
+        for name in ["temperature", "top_p", "seed"]:
+            if getattr(agent, name) is not None:
+                body[name] = getattr(agent, name)
+        return body, {"thinking_enabled": enabled, "requested_effort": agent.thinking_effort,
+                      "effective_effort": budget, "backend": "deepseek_vllm"}
+
+
+def adapter_for(agent: AgentConfig):
+    return {"deepseek": DeepSeekAdapter, "deepseek_vllm": DeepSeekVLLMAdapter,
+            "generic": GenericAdapter}[agent.backend]()

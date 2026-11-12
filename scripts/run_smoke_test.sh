@@ -36,6 +36,10 @@ export MAX_CONTEXT_TOKENS="${MAX_CONTEXT_TOKENS:-32768}"
 export MAX_INPUT_TOKENS="${MAX_INPUT_TOKENS:-24000}"
 export TOKENIZER_PATH="${TOKENIZER_PATH:-/mnt/hdd/nhatminh/SpecDecode/models/Qwen3-4B}"
 export LIMIT="${LIMIT:-2}"
+# Local Qwen smoke remains small even though production now schedules up to 60 cases.
+export MAX_WORKERS="${MAX_WORKERS:-1}"
+export MAX_CONCURRENT_REQUESTS="${MAX_CONCURRENT_REQUESTS:-1}"
+export BATCH_SIZE="${BATCH_SIZE:-8}"
 export MAX_DEBATE_ROUNDS="${MAX_DEBATE_ROUNDS:-2}"
 # Chỉ PASS vào output; vụ không đạt lưu REJECTED, lỗi kỹ thuật giữ FAILED.
 export UNRESOLVED_POLICY="${UNRESOLVED_POLICY:-reject}"

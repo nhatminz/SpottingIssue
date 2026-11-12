@@ -11,7 +11,7 @@ from uuid import uuid4
 import httpx
 
 from ..config import AgentConfig, PipelineConfig
-from .adapters import DeepSeekAdapter, GenericAdapter
+from .adapters import DeepSeekVLLMAdapter, adapter_for
 from .base_client import Completion, ContextLimitError, LLMError
 
 log = logging.getLogger(__name__)
@@ -22,8 +22,8 @@ class OpenAICompatibleClient:
                  role: str, transport: httpx.AsyncBaseTransport | None = None, tokenizer=None):
         self.agent, self.config, self.role = agent, config, role
         self.semaphore = semaphore
+        self.parameters, self.effective_thinking = adapter_for(agent).parameters(agent, config)
         self.http = httpx.AsyncClient(timeout=agent.timeout or config.api_request_timeout, transport=transport, trust_env=False)
-        self.parameters, self.effective_thinking = (DeepSeekAdapter() if agent.backend == "deepseek" else GenericAdapter()).parameters(agent, config)
         self.tokenizer = tokenizer
         self.rng = random.Random(config.random_seed)
         self.calls: list[dict] = []
@@ -42,6 +42,8 @@ class OpenAICompatibleClient:
             body.update(deepcopy(extra))
         if self.agent.stop:
             body["stop"] = self.agent.stop
+        if self.agent.backend == "deepseek_vllm":
+            DeepSeekVLLMAdapter.validate_body(body)
         return body
 
     def _check_context(self, body: dict) -> None:
@@ -85,7 +87,10 @@ class OpenAICompatibleClient:
                 if isinstance(call["actual_thinking_parameters"].get("chat_template_kwargs"),dict):
                     call["actual_thinking_parameters"]["chat_template_kwargs"] = {
                         k:v for k,v in body["chat_template_kwargs"].items()
-                        if k in ["enable_thinking", "thinking"] and type(v) is bool}
+                        if (k in ["enable_thinking", "thinking"] and type(v) is bool)
+                        or (k == "reasoning_effort" and
+                            ((type(v) is int and 1 <= v <= 100) or
+                             (isinstance(v, str) and v in ["low", "high", "xhigh", "max", "none"])))}
                 if self.config.save_raw_responses:
                     # Save answer text only; even raw mode excludes model reasoning.
                     call["raw_final_content"] = discard_reasoning_tags(content)
