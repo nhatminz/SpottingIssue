@@ -1,3 +1,5 @@
+> Historical v3 report. Current quote-free semantic contract and commands: [semantic_grounding.md](semantic_grounding.md).
+
 # Fix lỗi startup kiểm tra few-shot trên B200
 
 ## Lỗi đã tái hiện

@@ -2,7 +2,6 @@
 from __future__ import annotations
 from ..schemas import (DiscoveryOutput, GeneratorOutput, JudgeOutput, JudgeCandidate, PublicIssue,
                        SafeResponse, SafeAssessment, SafeFeedback, SafeHistory)
-from ..validators.evidence_validator import validate_quotes
 from ..validators.judge_validator import scope_rubric_passes
 from .base_agent import BaseAgent
 
@@ -10,15 +9,8 @@ from .base_agent import BaseAgent
 def public_candidate(candidate: GeneratorOutput, facts_clean: str) -> JudgeCandidate:
     if type(candidate) is not GeneratorOutput or not isinstance(facts_clean, str):
         raise TypeError("Public candidate projection requires GeneratorOutput and facts_clean")
-    public_text = "\n".join(text for i in candidate.issues for text in (i.issue_text, i.explain))
-    for support in candidate.private_judicial_support:
-        for quote in support.application_evidence_quotes + support.conclusion_evidence_quotes:
-            if quote not in facts_clean and quote in public_text:
-                raise ValueError("Private judicial evidence cannot cross the Judge boundary")
-    responses = []
-    for r in candidate.responses_to_feedback:
-        validate_quotes(r.facts_evidence_quotes, facts_clean, "public rebuttal", required=r.decision != "ACCEPT")
-        responses.append(SafeResponse(feedback_id=r.feedback_id, decision=r.decision, facts_evidence_quotes=list(r.facts_evidence_quotes)))
+    responses = [SafeResponse(feedback_id=r.feedback_id, decision=r.decision, facts_argument=r.facts_argument)
+                 for r in candidate.responses_to_feedback]
     # This explicit construction is the only Generator -> Judge projection.
     return JudgeCandidate(issues=[PublicIssue(issue_id=i.issue_id, issue_text=i.issue_text, explain=i.explain)
                                   for i in candidate.issues], responses_to_feedback=responses)
@@ -27,18 +19,18 @@ def public_candidate(candidate: GeneratorOutput, facts_clean: str) -> JudgeCandi
 class FeedbackFirewall:
     @staticmethod
     def project(judgment: JudgeOutput, facts_clean: str, current: JudgeCandidate):
+        if type(judgment) is not JudgeOutput or not isinstance(facts_clean, str):
+            raise TypeError("Feedback projection requires a facts-only JudgeOutput")
         ids = {i.issue_id for i in current.issues} if current is not None else None
         feedback, assessments = [], []
         for f in judgment.generator_visible_feedback:
-            validate_quotes(f.facts_evidence_quotes, facts_clean, "visible feedback")
             if ids is not None and set(f.issue_ids)-ids:
                 raise ValueError("Feedback refers to an unknown issue ID")
             feedback.append(SafeFeedback(feedback_id=f.feedback_id, issue_ids=f.issue_ids,
-                error_code=f.error_code, action=f.action, facts_evidence_quotes=f.facts_evidence_quotes))
+                error_code=f.error_code, action=f.action, explanation=f.explanation))
         for a in judgment.rebuttal_assessments:
-            validate_quotes(a.facts_evidence_quotes, facts_clean, "rebuttal assessment")
             assessments.append(SafeAssessment(feedback_id=a.feedback_id, decision=a.decision,
-                                               facts_evidence_quotes=a.facts_evidence_quotes))
+                                               explanation=a.explanation))
         return feedback, assessments
 
 
@@ -60,8 +52,6 @@ class JudgeAgent(BaseAgent):
             ids = [i.issue_id for i in output.issues]
             if len(ids) != len(set(ids)):
                 raise ValueError("Duplicate discovery ID")
-            for issue in output.issues:
-                validate_quotes(issue.facts_evidence_quotes, facts_clean, "blind discovery")
         return await self.infer({"facts_clean": facts_clean}, DiscoveryOutput, validate=validate,
                                 system_prompt_override=self.blind_system_prompt)
 
@@ -77,14 +67,11 @@ class JudgeAgent(BaseAgent):
             raise TypeError("Invalid blind discovery")
         if self.config.enable_blind_judge_discovery and discovery is None:
             raise ValueError("Evaluation requires the completed facts-only discovery")
-        for h in history:
-            for item in h.feedback + h.responses + h.assessments:
-                validate_quotes(item.facts_evidence_quotes, facts_clean, "Judge history", required=bool(item.facts_evidence_quotes))
         prior = None
         if previous is not None:
             safe_f, safe_a = FeedbackFirewall.project(previous, facts_clean, None)
-            # Previous feedback may refer to an issue now removed. Only the
-            # facts-only IDs/enums/quotes matter; narratives are never forwarded.
+            # Only Judge-authored feedback and public facts-based arguments
+            # enter history. Generator's private scope notes never cross here.
             prior = {"overall_verdict": previous.overall_verdict,
                      "feedback": [f.model_dump(mode="json") for f in safe_f],
                      "assessments": [a.model_dump(mode="json") for a in safe_a]}
@@ -106,10 +93,10 @@ class JudgeAgent(BaseAgent):
             raise ValueError("Duplicate feedback ID")
         core_ids = {r.issue_id for r in output.per_issue_reviews if r.classification == "CORE"}
         for review in output.per_issue_reviews:
-            validate_quotes(review.facts_evidence_quotes, facts_clean, "issue/explain review")
             if set(review.related_issue_ids)-(ids-{review.issue_id}):
                 raise ValueError("Unknown related issue ID")
-            if review.verdict == "PASS" and (review.classification != "CORE" or review.error_codes):
+            if review.verdict == "PASS" and (review.classification != "CORE" or review.error_codes
+                                             or not review.issue_supported or not review.explain_supported):
                 raise ValueError("Only error-free CORE pairs may PASS")
             if review.verdict != "PASS":
                 if not review.error_codes or not any(review.issue_id in f.issue_ids for f in output.generator_visible_feedback):
@@ -120,7 +107,6 @@ class JudgeAgent(BaseAgent):
         if len(coverage) != len(output.coverage_analysis):
             raise ValueError("Duplicate coverage ID")
         for item in output.coverage_analysis:
-            validate_quotes(item.facts_evidence_quotes, facts_clean, "coverage facts")
             if set(item.matched_issue_ids)-core_ids:
                 raise ValueError("Coverage may match only current CORE IDs")
         gaps = {key for key, item in coverage.items() if not item.matched_issue_ids}
@@ -132,7 +118,6 @@ class JudgeAgent(BaseAgent):
         if set(comparisons) != expected or len(comparisons) != len(expected):
             raise ValueError("Compare every blind proposal exactly once")
         for comparison in output.blind_comparison:
-            validate_quotes(comparison.facts_evidence_quotes, facts_clean, "blind comparison")
             refs, matches = set(comparison.coverage_issue_ids), set(comparison.matched_issue_ids)
             if refs-coverage.keys() or matches-core_ids:
                 raise ValueError("Unknown blind comparison reference")

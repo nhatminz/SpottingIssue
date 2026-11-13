@@ -1,6 +1,6 @@
 # Vietnamese Legal Issue Spotting: full-judgment Generator, facts-only Judge
 
-Pipeline hiện dùng schema FAC: Generator đọc bản án đầy đủ để chọn CORE issues và giải thích bằng `benchmark_seed.facts_clean`; Judge độc lập chỉ đọc facts_clean, cặp issue/explain và lịch sử facts-only. Hai vai trò có client, system prompt và request riêng dù dùng cùng DeepSeek đã serve. Chỉ bản án Judge PASS và đạt validation mới được xuất. Đây là candidate gold labels có kiểm chứng tự động; cần đánh giá chuyên gia để xác định độ chính xác pháp lý thực tế.
+Contract hiện tại: `fac_semantic_grounding_v4`. Không yêu cầu evidence quotes, exact substring matching hay source span IDs. Pipeline dùng schema FAC: Generator đọc bản án đầy đủ để chọn CORE issues và giải thích bằng `benchmark_seed.facts_clean`; Judge độc lập chỉ đọc facts_clean, cặp issue/explain và lịch sử facts-only. Hai vai trò có client, system prompt và request riêng dù dùng cùng DeepSeek đã serve. Chỉ bản án Judge PASS và đạt validation mới được xuất. Đây là candidate gold labels có kiểm chứng tự động; cần đánh giá chuyên gia để xác định độ chính xác pháp lý thực tế.
 
 ## Input và output
 
@@ -20,22 +20,22 @@ Hai list cùng độ dài, đúng thứ tự và ghép cặp. Issue là cụm da
 ## Luồng dữ liệu và ranh giới truy cập
 
 1. Preflight kiểm tra toàn bộ JSONL, cấu hình, prompts, file few-shot và trùng ví dụ.
-2. Trước khi dùng ví dụ, chính Generator audit grounding của toàn bộ cặp issue/explain trong 5 few-shot bằng một request riêng chỉ chứa facts_clean, nhãn mẫu và các facts spans đánh ID. Model chọn ID như `E4-S12`; code lấy đoạn nguyên văn từ facts_clean, không bắt model chép lại quote OCR/Unicode. Mọi cặp phải được hỗ trợ; một kết luận unsupported dừng ngay với `FewShotGroundingError` và chỉ rõ doc_name/issue_index, không retry để đổi false thành true. Chỉ lỗi JSON/ID được repair có giới hạn. Kết quả được lưu trong checkpoint/audit và không gọi lại khi resume cùng manifest. Đây vẫn là vai trò Generator, không phải Judge hay role thứ ba. Dry-run chỉ kiểm tra cấu trúc, không tuyên bố đã kiểm chứng grounding bằng model.
-3. Generator của từng vụ nhận nguyên vẹn facts_clean, facts, application, conclusion và markdown qua allowlist nguồn; dùng ví dụ đã duyệt. Các bước revision tiếp tục nhận đủ nguồn và ví dụ được phép.
-4. Generator chọn câu hỏi thực sự được application phân tích và conclusion giải quyết, nhưng issue/explain chỉ dùng facts_clean. Mỗi issue có facts evidence cho cả issue/explain, cộng evidence application/conclusion và xác nhận phạm vi ở `private_judicial_support`. Phần này chỉ vào audit.
-5. Code dựng `JudgeCandidate` mới, chỉ gồm issue_id, issue_text, explain và phản biện đã lọc xuống enum/ID/quotes facts. Không truyền GeneratorOutput hoặc full record. API Judge chỉ nhận facts_clean dạng chuỗi, không có API nhận full record. Không chuyển private explanation, metadata, raw facts, trích luật hoặc few-shot. SafeHistory là schema riêng; dict tùy ý bị từ chối. Retry/repair của Judge chỉ lặp lại request facts-only của chính nó.
-6. Nếu bật blind discovery (mặc định true), cùng Judge thực hiện request mới chỉ có facts_clean; không thấy Generator candidate. Stage evaluation dùng facts và các đề xuất tạm thời, có thể loại đề xuất blind hoặc phát hiện vấn đề cả hai danh sách bỏ sót.
-7. Judge chấm 8 tiêu chí: grounding, legal_relevance, coverage, independence, format/non-conclusiveness, explanation_quality, consistency và deduplication. Judge không được tuyên bố xác minh phạm vi xét xử thực tế vì không thấy bản án.
-8. Judge phản hồi có mã lỗi, ID, hành động, giải thích và facts evidence. Generator có thể ACCEPT/CONTEST/PARTIALLY_ACCEPT; Judge đánh giá lại và WITHDRAW/UPHOLD/PARTIALLY_WITHDRAW. Tối đa 6 chu trình Judge → Generator, thêm một Judge đánh giá bản sửa thứ 6; không có lần sửa thứ 7. Có early stop và stagnation detection, trong đó thay đổi explain được tính vào tiến triển.
-9. Chỉ final candidate PASS mới COMPLETED. REJECTED không vào main output; API/timeout/parsing/validation thất bại là FAILED, không tạo nhãn thay thế.
+2. Chính Generator audit **ngữ nghĩa** tất cả cặp issue/explain trong 5 ví dụ trước khi dùng chúng. Request chỉ có facts_clean, labels và IDs ví dụ/cặp để bookkeeping; không có quotes, source spans hoặc span IDs. Mỗi cặp có issue_supported, explain_supported và explanation. Semantic rejection của reference được báo riêng bằng FewShotGroundingError, giữ nguyên gold labels/facts và không retry để ép đổi false thành true. Kết quả approval được cache theo manifest. Dry-run chỉ kiểm tra cấu trúc.
+3. Generator nhận đủ facts_clean, facts, application, conclusion và markdown qua allowlist, cùng ví dụ được phép. Generator chọn CORE issues thực sự được application xử lý và phù hợp conclusion; issue/explain và public rebuttal chỉ dựa trên facts_clean.
+4. Issue có issue_id, issue_text, explain và metadata ba thành phần để kiểm tra định dạng. private_judicial_support chỉ có issue_id, hai semantic scope flags và explanation riêng; không có trích dẫn. Scope chưa xác nhận được xem là vấn đề semantic để Generator xem xét lại hoặc loại issue, không ném lỗi kỹ thuật chỉ vì false flag.
+5. Judge nhận một projection mới: facts_clean, public issue/explain pairs và facts_argument công khai. Không truyền full record, raw facts, application, conclusion, markdown, citations, few-shot hay private scope metadata. SafeHistory chỉ chứa typed public feedback, facts_arguments và Judge assessments. Không chuyển private source notes hoặc reasoning_content. Những public claims chưa được xác minh tiếp tục được Judge đối chiếu về ý nghĩa với facts.
+6. Blind discovery là request facts-only độc lập của cùng Judge. Mỗi đề xuất có một giải thích semantic, không cần evidence fields; đề xuất có thể bị loại sau khi đánh giá coverage.
+7. Judge chấm 8 tiêu chí: grounding, legal_relevance, coverage, independence, format, explanation_quality, consistency, deduplication. Mỗi cặp có **hai flags issue_supported/explain_supported riêng**. Paraphrase đúng và suy luận pháp lý hợp lý là hợp lệ; thêm sự kiện không được facts hỗ trợ là lỗi. Judge không khẳng định đã xác minh phạm vi xét xử thực tế.
+8. Feedback nêu issue, lỗi, chi tiết thiếu/mâu thuẫn/suy diễn, lý do và cách sửa trong explanation. Generator được ACCEPT/CONTEST/PARTIALLY_ACCEPT bằng facts_argument; Judge WITHDRAW/UPHOLD/PARTIALLY_WITHDRAW có explanation. Tối đa 6 lượt revision và 7 Judge evaluations; final revision luôn được đánh giá, giữ early stop và stagnation. Stagnation theo candidate/arguments lặp lại, không theo việc có quote mới hay không.
+9. Chỉ final candidate với cả hai grounding flags, 8 tiêu chí, coverage, private scope và mechanical validation đều đạt mới COMPLETED. Candidate semantic không đạt sau debate là REJECTED. API/parsing/schema/ID/format không sửa được sau retry là FAILED. Một lỗi grounding được Judge ghi REVISE không tự biến thành exception.
 
-Exact quotes kiểm tra nguồn gốc, không chứng minh ngữ nghĩa. Code chặn verbatim private evidence trong public pair, tách hoàn toàn private metadata/history; Judge chịu trách nhiệm ngữ nghĩa facts-only của các diễn đạt còn lại. Không giả vờ rằng regex có thể chứng minh mọi tình tiết của một câu diễn giải.
+Python tiếp tục kiểm tra JSON/schema, IDs, pairing, prefix/focus group, ba phần, duplicate cơ học, coverage references, PASS consistency và input/output preservation. Grounding của diễn đạt tự nhiên do Judge đánh giá, không dùng exact/fuzzy matching, embeddings hay source spans. Chi tiết và tests A-G: [semantic_grounding.md](docs/semantic_grounding.md).
 
 ## Few-shot
 
 `FEWSHOT_PATH=$PROJECT_ROOT/input/fewshot.jsonl`, đúng 5 ví dụ thuộc Marriage & Family, Criminal, Civil, Commercial, Administrative. Loader hỗ trợ `issues: [{issue, explain, ...}]` hoặc `issues: [string]` kèm `explain: [string]`; chuẩn hóa thành `facts_clean`, `issues`, `explain` cùng category/example_id. Không đưa application/conclusion/markdown của ví dụ vào request.
 
-Reference `1178738-I03` đã được sửa để bỏ chi tiết "hợp đồng thế chấp đã được công chứng" không có trong facts_clean. Chỉ nhãn này thay đổi, không sửa facts hoặc bản án; bản gốc được giữ ở `docs/history/fewshot_before_grounding_fix.jsonl`. Khi đồng bộ B200 cần copy cả `input/fewshot.jsonl` đã sửa, không chỉ Python/prompts. Chi tiết và lệnh chạy bằng namespace mới: [fewshot_startup_fix.md](docs/fewshot_startup_fix.md).
+Reference `1178738-I03` đã được sửa để bỏ chi tiết "hợp đồng thế chấp đã được công chứng" không có trong facts_clean. Chỉ nhãn này thay đổi, không sửa facts hoặc bản án; bản gốc được giữ ở `docs/history/fewshot_before_grounding_fix.jsonl`. Khi đồng bộ B200 cần copy cả `input/fewshot.jsonl` đã sửa, không chỉ Python/prompts. Bản sửa này giữ nguyên byte của input/fewshot. Báo cáo correction trước đây ở [fewshot_startup_fix.md](docs/fewshot_startup_fix.md) là lịch sử; cơ chế span IDs trong báo cáo đó đã được thay bằng semantic audit.
 
 Thông thường Generator nhận đủ 5 ví dụ ở mọi lượt. Nếu doc_name/official_document_id/web_url hoặc facts chuẩn hóa khớp ví dụ, loại chính ví dụ đó và ghi warning/audit `excluded_fewshot_examples`; không tự tạo mẫu thay thế. Với 5 vụ trùng trong input mẫu, mỗi vụ dùng 4 ví dụ khác. Judge không nhận ví dụ ở bất kỳ giai đoạn nào.
 
@@ -55,7 +55,7 @@ Sau khi đồng bộ src/prompts/scripts và hai file input/fewshot sang đúng 
 
 ```bash
 cd /workspace/storage-shared/nlp/minhpn19/LegalDataset
-RUN_DIR="$PWD/output/fac_facts_only_v1"
+RUN_DIR="$PWD/output/semantic_grounding_v4"
 
 INPUT_PATH="$PWD/input/sample_input.jsonl" \
 FEWSHOT_PATH="$PWD/input/fewshot.jsonl" \
@@ -83,7 +83,7 @@ Lặp đúng lệnh để resume. Không đổi START_INDEX theo số dòng outp
 
 ## Cấu hình
 
-Toàn bộ biến runtime được đưa ra `scripts/run_pipeline.sh` và có thể override từ môi trường.
+Toàn bộ biến runtime được đưa ra `scripts/run_pipeline.sh` và có thể override từ môi trường. Đã bỏ ENABLE_EVIDENCE_VALIDATION; semantic grounding luôn là điều kiện PASS của Judge, không phải một quote-validation toggle.
 
 | Nhóm | Defaults chính |
 | --- | --- |
@@ -107,9 +107,9 @@ Nếu server không hỗ trợ output 131073/context tương ứng, request vẫ
 
 Main output chỉ chứa COMPLETED. `rejected_cases.jsonl` chứa doc_name, rounds, issues/explain cuối, final verdict, lý do và toàn bộ feedback_history. FAILED lưu trong logs/failures.jsonl, không nhầm với REJECTED. Với FAIL_ON_RECORD_ERROR=true, ngừng nhận vụ mới khi có lỗi và chờ vụ đang chạy; false cho phép xử lý tiếp những vụ khác. Có thể tăng timeout/giảm workers bằng environment khi server chậm. Exit 0 khi toàn bộ selection đã COMPLETED hoặc REJECTED; exit 2 khi còn FAILED/PENDING hoặc có lỗi cấu hình. Không cam kết tất cả input sẽ PASS.
 
-SQLite là nguồn trạng thái chính, output/rejected được ghi atomic theo index input. Skip COMPLETED/REJECTED khi resume, retry FAILED/RUNNING/PENDING. Manifest hash toàn input, 7 prompts, source code, cấu hình semantic, few-shot và export policy `fac_facts_only_v3`. Checkpoint của contract cũ bị từ chối. Đổi few-shot/prompts/nguồn/model/effort/selection cần bộ đường dẫn mới; thay concurrency, timeout, retry, logging không làm đổi semantic hash. Không xóa checkpoint cũ để lách kiểm tra.
+SQLite là nguồn trạng thái chính, output/rejected được ghi atomic theo index input. Skip COMPLETED/REJECTED khi resume, retry FAILED/RUNNING/PENDING. Manifest hash toàn input, 7 prompts, source code, cấu hình semantic, few-shot và export policy `fac_semantic_grounding_v4`. Checkpoint quote/span contract v3 bị từ chối trước khi mở SQLite để ghi; dùng RUN_DIR mới ở trên, không xóa checkpoint cũ. Đổi few-shot/prompts/nguồn/model/effort/selection cần bộ đường dẫn mới; thay concurrency, timeout, retry, logging không làm đổi semantic hash. Không xóa checkpoint cũ để lách kiểm tra.
 
-Audit từng vụ giữ candidate/private judicial evidence của Generator, facts-only Judge reviews, explains, debate, excluded examples và request usage. `audit/fewshot_validation.json` lưu cả review dùng span IDs và report có quotes do code lấy từ nguồn. Lỗi phê duyệt ghi toàn bộ findings (doc_name, issue_index, issue/explain, lý do), review, sanitized API calls và usage vào `fewshot_validation_failed.json`/checkpoint. Summary đánh dấu `global_status=FAILED`, `fewshot_grounding=NOT_APPROVED` khi startup bị chặn, không dùng ví dụ lỗi hoặc đánh dấu vụ giả thành công. SAVE_RAW_RESPONSES=true lưu final JSON để debug, vẫn loại reasoning_content. Dữ liệu private không vào request Judge hoặc thêm vào main output ngoài input gốc.
+Audit từng vụ giữ candidate/private semantic scope notes của Generator, facts-only Judge reviews, explains, debate, excluded examples và request usage. `audit/fewshot_validation.json` lưu semantic review/report với support flags và explanations; không có quotes hoặc span IDs. Lỗi phê duyệt ghi toàn bộ findings (doc_name, issue_index, issue/explain, lý do), review, sanitized API calls và usage vào `fewshot_validation_failed.json`/checkpoint. Summary đánh dấu `global_status=FAILED`, `fewshot_grounding=NOT_APPROVED` khi startup bị chặn, không dùng ví dụ lỗi hoặc đánh dấu vụ giả thành công. SAVE_RAW_RESPONSES=true lưu final JSON để debug, vẫn loại reasoning_content. Dữ liệu private không vào request Judge hoặc thêm vào main output ngoài input gốc.
 
 ## Kiểm chứng
 
@@ -118,4 +118,4 @@ Audit từng vụ giữ candidate/private judicial evidence của Generator, fac
 PROJECT_ROOT="$PWD" DRY_RUN=true bash scripts/run_pipeline.sh
 ```
 
-Các test contract cũ trái với thiết kế mới được giữ tại `tests/legacy_situation_contract/*.txt`; chúng không còn là kiểm thử của API hiện tại. Tests mới kiểm tra full sources, facts-only allowlist qua blind/retry/rebuttal/final, explanations, private evidence, 5 examples/overlap/screening, 6 revisions, output preservation, reject/failure, resume/fingerprints, 40 workers và 40 HTTP requests. Các API/retry/effort tests vẫn chạy. Chi tiết báo cáo ở [docs/fac_refactor.md](docs/fac_refactor.md). Các báo cáo Qwen/situation cũ là lịch sử, không phải kết quả kiểm chứng contract mới.
+Các test contract cũ trái với thiết kế mới được giữ tại `tests/legacy_situation_contract/*.txt`; chúng không còn là kiểm thử của API hiện tại. Tests mới kiểm tra full sources, facts-only allowlist qua blind/retry/rebuttal/final, paraphrase/unsupported-detail debate, private metadata isolation, 5 examples/overlap/screening, 6 revisions, output preservation, reject/failure, resume/fingerprints, 40 workers và 40 HTTP requests. Các API/retry/effort tests vẫn chạy. Báo cáo hiện tại ở [docs/semantic_grounding.md](docs/semantic_grounding.md); [docs/fac_refactor.md](docs/fac_refactor.md) mô tả contract v3 lịch sử. Các báo cáo Qwen/situation cũ là lịch sử, không phải kết quả kiểm chứng contract mới.

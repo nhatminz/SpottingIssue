@@ -14,6 +14,16 @@ class CheckpointManager:
         path = directory/"state.sqlite3"
         if path.exists() and not resume:
             raise ValueError("Checkpoint already exists; use RESUME=true or a new checkpoint directory")
+        if path.exists():
+            # Check compatibility read-only BEFORE SQLite pragmas/schema writes.
+            # A v3 run must remain untouched when v4 declines to resume it.
+            previous = sqlite3.connect(path.resolve().as_uri()+"?mode=ro", uri=True)
+            try:
+                existing = previous.execute("SELECT value FROM metadata WHERE key='manifest'").fetchone()
+                if not existing or json.loads(existing[0]) != manifest:
+                    raise ValueError("Resume fingerprint mismatch (input/config/prompts/code); use NEW output/audit/checkpoint paths")
+            finally:
+                previous.close()
         self.db = sqlite3.connect(path)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")

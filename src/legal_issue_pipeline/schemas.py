@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 IssueId = Annotated[str, Field(pattern=r"^I[1-9][0-9]{0,5}$")]
+CONTRACT_VERSION = "fac_semantic_grounding_v4"
 
 
 class Structured(BaseModel):
@@ -36,15 +37,10 @@ class Issue(Structured):
     focus: str = Field(min_length=1)
     subject_action: str = Field(min_length=1)
     decisive_fact: str = Field(min_length=1)
-    facts_evidence_quotes: list[str] = Field(min_length=1)
-    explanation_evidence_quotes: list[str] = Field(min_length=1)
-    importance: Literal["CORE"]
 
 
 class JudicialSupport(Structured):
     issue_id: str = Field(pattern=r"^I[1-9][0-9]{0,5}$")
-    application_evidence_quotes: list[str] = Field(min_length=1)
-    conclusion_evidence_quotes: list[str] = Field(min_length=1)
     judicial_relevance_confirmed: bool
     conclusion_consistent: bool
     explanation: str = Field(min_length=1, max_length=1500)
@@ -53,8 +49,8 @@ class JudicialSupport(Structured):
 class FeedbackResponse(Structured):
     feedback_id: str = Field(pattern=r"^F[1-9][0-9]{0,5}$")
     decision: Literal["ACCEPT", "CONTEST", "PARTIALLY_ACCEPT"]
-    explanation: str = Field(min_length=1, max_length=1500)
-    facts_evidence_quotes: list[str]
+    # Public facts-based argument, unlike private_judicial_support.explanation.
+    facts_argument: str = Field(min_length=1, max_length=1500)
 
 
 class GeneratorOutput(Structured):
@@ -66,7 +62,7 @@ class GeneratorOutput(Structured):
 class SafeResponse(Structured):
     feedback_id: str = Field(pattern=r"^F[1-9][0-9]{0,5}$")
     decision: Literal["ACCEPT", "CONTEST", "PARTIALLY_ACCEPT"]
-    facts_evidence_quotes: list[str]
+    facts_argument: str = Field(min_length=1, max_length=1500)
 
 
 class PublicIssue(Structured):
@@ -85,7 +81,6 @@ class Feedback(Structured):
     issue_ids: list[IssueId]
     error_code: ErrorCode
     action: Literal["REVISE", "REMOVE", "ADD", "SPLIT", "RECONSIDER"]
-    facts_evidence_quotes: list[str] = Field(min_length=1)
     explanation: str = Field(min_length=1, max_length=1500)
 
 
@@ -94,20 +89,19 @@ class SafeFeedback(Structured):
     issue_ids: list[IssueId]
     error_code: ErrorCode
     action: Literal["REVISE", "REMOVE", "ADD", "SPLIT", "RECONSIDER"]
-    facts_evidence_quotes: list[str]
+    explanation: str = Field(min_length=1, max_length=1500)
 
 
 class RebuttalAssessment(Structured):
     feedback_id: str = Field(pattern=r"^F[1-9][0-9]{0,5}$")
     decision: Literal["WITHDRAW", "UPHOLD", "PARTIALLY_WITHDRAW"]
     explanation: str = Field(min_length=1, max_length=1500)
-    facts_evidence_quotes: list[str] = Field(min_length=1)
 
 
 class SafeAssessment(Structured):
     feedback_id: str = Field(pattern=r"^F[1-9][0-9]{0,5}$")
     decision: Literal["WITHDRAW", "UPHOLD", "PARTIALLY_WITHDRAW"]
-    facts_evidence_quotes: list[str]
+    explanation: str = Field(min_length=1, max_length=1500)
 
 
 class SafeHistory(Structured):
@@ -118,12 +112,13 @@ class SafeHistory(Structured):
 
 class IssueReview(Structured):
     issue_id: IssueId
+    issue_supported: bool
+    explain_supported: bool
     classification: Literal["CORE", "SUPPORTING_FACT", "IRRELEVANT", "DUPLICATE"]
     related_issue_ids: list[IssueId]
     verdict: Literal["PASS", "REVISE", "REMOVE", "NEEDS_REVIEW"]
     error_codes: list[ErrorCode]
     explanation: str = Field(min_length=1, max_length=1500)
-    facts_evidence_quotes: list[str] = Field(min_length=1)
 
 
 class EvaluationRubric(Structured):
@@ -141,7 +136,7 @@ class EvaluationRubric(Structured):
 class CoverageItem(Structured):
     coverage_id: str = Field(pattern=r"^C[1-9][0-9]{0,5}$")
     issue_text: str = Field(min_length=10)
-    facts_evidence_quotes: list[str] = Field(min_length=1)
+    explanation: str = Field(min_length=1, max_length=1500)
     matched_issue_ids: list[str]
 
 
@@ -150,7 +145,6 @@ class BlindComparison(Structured):
     disposition: Literal["MATCHED", "MISSING", "EXCLUDED", "NEEDS_REVIEW"]
     coverage_issue_ids: list[str]
     matched_issue_ids: list[str]
-    facts_evidence_quotes: list[str] = Field(min_length=1)
     explanation: str = Field(min_length=1, max_length=1500)
 
 
@@ -170,7 +164,7 @@ class JudgeOutput(Structured):
 class DiscoveryIssue(Structured):
     issue_id: str = Field(pattern=r"^D[1-9][0-9]{0,5}$")
     issue_text: str = Field(min_length=10)
-    facts_evidence_quotes: list[str] = Field(min_length=1)
+    explanation: str = Field(min_length=1, max_length=1500)
 
 
 class DiscoveryOutput(Structured):
@@ -178,27 +172,12 @@ class DiscoveryOutput(Structured):
 
 
 class FewShotIssueCheck(Structured):
-    example_id: str
+    example_id: str = Field(pattern=r"^E[1-5]$")
     issue_index: int = Field(ge=0)
     issue_supported: bool
     explain_supported: bool
-    facts_evidence_quotes: list[str] = Field(min_length=1)
     explanation: str = Field(min_length=1, max_length=1500)
 
 
 class FewShotValidation(Structured):
     checks: list[FewShotIssueCheck]
-
-
-class FewShotReviewCheck(Structured):
-    """LLM returns source IDs; exact text is resolved by code, never recopied."""
-    example_id: str = Field(pattern=r"^E[1-5]$")
-    issue_index: int = Field(ge=0)
-    issue_supported: bool
-    explain_supported: bool
-    facts_span_ids: list[str]
-    explanation: str = Field(min_length=1, max_length=1500)
-
-
-class FewShotReview(Structured):
-    checks: list[FewShotReviewCheck]

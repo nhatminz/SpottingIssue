@@ -18,7 +18,7 @@ from ..io.jsonl_reader import JSONLReader, InputRecord
 from ..io.jsonl_writer import JSONLWriter, atomic_text
 from ..io.result_exporter import ResultExporter
 from ..io.fewshot import FewShotBank
-from ..schemas import FewShotValidation, FewShotReview
+from ..schemas import FewShotValidation, CONTRACT_VERSION
 from ..llm.client_factory import ClientFactory
 from ..llm.adapters import adapter_for
 from ..validators.output_validator import make_output
@@ -34,7 +34,7 @@ def create_manifest(config: PipelineConfig, input_hash: str) -> dict:
     source_root = Path(__file__).resolve().parents[1]
     code_hash = digest({str(p.relative_to(source_root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(source_root.rglob("*.py"))})
     return {"input_sha256": input_hash, "config_sha256": digest(config.semantic_dict()), "prompt_sha256": prompt_hashes,
-            "code_sha256": code_hash, "export_policy":"fac_facts_only_v3",
+            "code_sha256": code_hash, "export_policy":CONTRACT_VERSION,
             "fewshot_sha256":hashlib.sha256(config.fewshot_path.read_bytes()).hexdigest(), "output_path": str(config.output_path),
             "rejected_path":str(config.rejected_path),"audit_dir": str(config.audit_dir), "log_dir": str(config.log_dir)}
 
@@ -251,15 +251,16 @@ class PipelineRunner:
             if saved:
                 self.fewshot.validate_report(FewShotValidation.model_validate_json(json.dumps(saved["report"])))
                 if saved.get("review"):
-                    restored = self.fewshot.resolve_review(FewShotReview.model_validate_json(json.dumps(saved["review"])))
+                    restored = FewShotValidation.model_validate_json(json.dumps(saved["review"]))
+                    self.fewshot.validate_report(restored)
                     if restored.model_dump(mode="json") != saved["report"]:
-                        raise ValueError("Cached few-shot review and source evidence disagree")
+                        raise ValueError("Cached few-shot review and semantic validation disagree")
             else:
                 validator = self._make_controller()
                 try:
                     report = await validator.generator.validate_fewshot()
                     saved = {"report":report.model_dump(mode="json"),
-                             "method":"source_span_ids_v1",
+                             "method":"semantic_grounding_v1",
                              "review":validator.generator.fewshot_review,
                              "api_calls":getattr(validator.generator.client,"calls",[])}
                     checkpoints.set_metadata("fewshot_validation", saved)

@@ -19,22 +19,21 @@ def issue_data():
     return dict(issue_id='I1',issue_text='Việc xác định quyền yêu cầu ly hôn của anh A khi chị B đã bị Tòa án tuyên bố mất tích',
         explain='Anh A yêu cầu ly hôn, trong khi chị B đã bị tuyên bố mất tích. Các dữ kiện này đặt ra vấn đề xác định quyền yêu cầu chấm dứt quan hệ hôn nhân của anh A.',
         focus_group='DETERMINATION',focus='Việc xác định quyền',subject_action='yêu cầu ly hôn của anh A',
-        decisive_fact='chị B đã bị Tòa án tuyên bố mất tích',facts_evidence_quotes=[FACTS],explanation_evidence_quotes=[FACTS],importance='CORE')
+        decisive_fact='chị B đã bị Tòa án tuyên bố mất tích')
 
 
 def gen_data():
     return dict(issues=[issue_data()],responses_to_feedback=[],private_judicial_support=[dict(issue_id='I1',
-        application_evidence_quotes=[APPLICATION],conclusion_evidence_quotes=[CONCLUSION],
         judicial_relevance_confirmed=True,conclusion_consistent=True,explanation='Yêu cầu ly hôn được xem xét và giải quyết độc lập. PRIVATE_GENERATOR_AUDIT_991')])
 
 
 def judge_data(verdict='PASS', blind=False):
-    return dict(per_issue_reviews=[dict(issue_id='I1',classification='CORE',related_issue_ids=[],verdict='PASS',error_codes=[],
-        explanation='Cặp issue/explain có đủ căn cứ từ facts_clean.',facts_evidence_quotes=[FACTS])],
+    return dict(per_issue_reviews=[dict(issue_id='I1',issue_supported=True,explain_supported=True,classification='CORE',related_issue_ids=[],verdict='PASS',error_codes=[],
+        explanation='Cặp issue/explain có đủ căn cứ từ facts_clean.')],
         rubric={**{key:'PASS' for key in RUBRIC_CRITERIA},'explanation':'Đã kiểm tra từng cặp và độ bao phủ từ facts.'},
-        coverage_analysis=[dict(coverage_id='C1',issue_text=issue_data()['issue_text'],facts_evidence_quotes=[FACTS],matched_issue_ids=['I1'])],
+        coverage_analysis=[dict(coverage_id='C1',issue_text=issue_data()['issue_text'],explanation='Yêu cầu chấm dứt hôn nhân và tình trạng mất tích làm phát sinh vấn đề quyền ly hôn.',matched_issue_ids=['I1'])],
         blind_comparison=[dict(discovery_issue_id='D1',disposition='MATCHED',coverage_issue_ids=['C1'],matched_issue_ids=['I1'],
-            facts_evidence_quotes=[FACTS],explanation='Đề xuất được facts hỗ trợ và candidate bao phủ.')] if blind else [],
+            explanation='Đề xuất được facts hỗ trợ và candidate bao phủ.')] if blind else [],
         error_codes=[],feedback='Đã kiểm tra facts-only.',generator_visible_feedback=[],rebuttal_assessments=[],
         overall_verdict=verdict,unresolved_disputes=[])
 
@@ -44,35 +43,37 @@ def critique(code='INVALID_EXPLANATION'):
     value['per_issue_reviews'][0].update(verdict='REVISE',error_codes=[code])
     value['rubric']['explanation_quality']='FAIL';value['error_codes']=[code]
     value['generator_visible_feedback']=[dict(feedback_id='F1',issue_ids=['I1'],error_code=code,action='RECONSIDER',
-        facts_evidence_quotes=[FACTS],explanation='Giải thích cần làm rõ tình tiết quyết định và yêu cầu ly hôn.')]
+        explanation='Giải thích cần làm rõ tình tiết quyết định và yêu cầu ly hôn.')]
+    if code == 'UNSUPPORTED_FACT':
+        value['per_issue_reviews'][0]['explain_supported']=False
+        value['rubric']['grounding']='FAIL'
     return value
 
 
 def response(decision='CONTEST'):
     value=gen_data()
     value['responses_to_feedback']=[dict(feedback_id='F1',decision=decision,
-        explanation='Facts đã xác định yêu cầu ly hôn và tình trạng mất tích. PRIVATE_REBUTTAL_NARRATIVE_005',facts_evidence_quotes=[FACTS])]
+        facts_argument='Yêu cầu chấm dứt hôn nhân xuất phát từ A, còn người vợ đã được xác định mất tích; diễn đạt này được tình tiết hỗ trợ.')]
+    value['private_judicial_support'][0]['explanation']+=' PRIVATE_REBUTTAL_NARRATIVE_005'
     return value
 
 
 def assessment(decision='WITHDRAW'):
-    return dict(feedback_id='F1',decision=decision,explanation='Đánh giá lại bằng chứng cụ thể từ facts.',facts_evidence_quotes=[FACTS])
+    return dict(feedback_id='F1',decision=decision,explanation='Đánh giá lại ý nghĩa và suy luận từ những tình tiết đã cho.')
 
 
 def discovery_data():
-    return {'issues':[{'issue_id':'D1','issue_text':issue_data()['issue_text'],'facts_evidence_quotes':[FACTS]}]}
+    return {'issues':[{'issue_id':'D1','issue_text':issue_data()['issue_text'],'explanation':'Yêu cầu ly hôn cùng việc mất tích đặt ra câu hỏi quyền chấm dứt hôn nhân.'}]}
 
 
 def fewshot_report(examples):
     return {'checks':[dict(example_id=example['example_id'],issue_index=index,issue_supported=True,explain_supported=True,
-        facts_evidence_quotes=[example['facts_clean']],explanation='Các dữ kiện hỗ trợ cặp issue/explain này.')
+        explanation='Các dữ kiện hỗ trợ ý nghĩa của cặp issue/explain này.')
         for example in examples for index in range(len(example['issues']))]}
 
 
 def fewshot_review(examples):
-    return {'checks':[dict(example_id=example['example_id'],issue_index=index,issue_supported=True,explain_supported=True,
-        facts_span_ids=[example['facts_spans'][0]['span_id']],explanation='Các dữ kiện hỗ trợ cặp issue/explain này.')
-        for example in examples for index in range(len(example['issues']))]}
+    return fewshot_report(examples)
 
 
 class FakeClient:

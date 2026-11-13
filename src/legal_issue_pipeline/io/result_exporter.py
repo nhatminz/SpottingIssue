@@ -8,9 +8,8 @@ from ..agents.base_agent import reject_duplicate_keys
 from ..config import PipelineConfig
 from ..validators.output_validator import validate_output
 from ..validators.judge_validator import scope_rubric_passes
-from ..schemas import GeneratorOutput
+from ..schemas import GeneratorOutput, JudgeOutput, CONTRACT_VERSION
 from ..validators.format_validator import candidate_errors
-from ..validators.evidence_validator import validate_quotes
 from .jsonl_reader import JSONLReader
 from .jsonl_writer import JSONLWriter
 
@@ -22,8 +21,8 @@ class ResultExporter:
     @staticmethod
     def require_accepted(row: dict) -> None:
         audit = row["audit"]
-        judge = audit.get("final_judge",{})
-        if (audit.get("contract") != "fac_facts_only_v3" or row["status"] != "COMPLETED" or row["output"] is None
+        judge = JudgeOutput.model_validate_json(json.dumps(audit.get("final_judge",{}))).model_dump(mode="json")
+        if (audit.get("contract") != CONTRACT_VERSION or row["status"] != "COMPLETED" or row["output"] is None
             or audit.get("consensus") != "PASS" or audit.get("required_validations_passed") is not True
             or judge.get("overall_verdict") != "PASS" or judge.get("unresolved_disputes")
             or not scope_rubric_passes(judge)
@@ -36,6 +35,8 @@ class ResultExporter:
         if ([i.issue_text for i in generated.issues] != row["output"]["issues"] or
             [i.explain for i in generated.issues] != row["output"]["explain"] or
             len(generated.private_judicial_support) != len(generated.issues) or
+            len({i.issue_id for i in generated.issues}) != len(generated.issues) or
+            {r["issue_id"] for r in judge["per_issue_reviews"]} != {i.issue_id for i in generated.issues} or
             {s.issue_id for s in generated.private_judicial_support} != {i.issue_id for i in generated.issues} or
             any(not s.judicial_relevance_confirmed or not s.conclusion_consistent for s in generated.private_judicial_support)):
             raise ValueError("Missing Generator judicial-scope proof or issue/explain alignment")
@@ -98,9 +99,6 @@ class ResultExporter:
                     generated = GeneratorOutput.model_validate_json(json.dumps(row["audit"]["final_generator"]))
                     if candidate_errors(generated,record.data["benchmark_seed"]["facts_clean"],self.config):
                         raise ValueError("Cached Generator candidate fails facts/format validation")
-                    for support in generated.private_judicial_support:
-                        validate_quotes(support.application_evidence_quotes,record.data["benchmark_seed"]["application"],"cached application")
-                        validate_quotes(support.conclusion_evidence_quotes,record.data["benchmark_seed"]["conclusion"],"cached conclusion")
                     emitted = self._next_object(output,"Main output")
                     validate_output(record.data,emitted)
                     if emitted != row["output"]:

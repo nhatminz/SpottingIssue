@@ -4,7 +4,6 @@ import pytest
 from legal_issue_pipeline.agents.generator import GeneratorAgent
 from legal_issue_pipeline.agents.judge import JudgeAgent, public_candidate
 from legal_issue_pipeline.debate.controller import DebateController
-from legal_issue_pipeline.llm.base_client import LLMError
 from legal_issue_pipeline.schemas import JudgeOutput, SafeHistory
 from conftest import (FACTS,APPLICATION,CONCLUSION,FakeClient,gen_data,judge_data,critique,
                       response,assessment,discovery_data)
@@ -63,21 +62,32 @@ async def test_judge_refuses_full_record_and_unprojected_generator(config,record
 
 
 @pytest.mark.parametrize('where',['issue','explain'])
-async def test_generator_private_evidence_cannot_be_public_grounding(config,record,where):
+async def test_unsupported_public_claim_is_a_semantic_judge_finding(config,record,where):
+    config.max_debate_rounds=1
+    record['benchmark_seed']['application']+=' Anh A đã đe dọa chị B bằng vũ lực.'
     value=gen_data()
-    if where=='issue':value['issues'][0]['facts_evidence_quotes']=[APPLICATION]
-    else:value['issues'][0]['explanation_evidence_quotes']=[CONCLUSION]
-    with pytest.raises(LLMError,match='UNSUPPORTED_FACT'):
-        await GeneratorAgent(FakeClient([value]),config).generate(record)
+    if where=='issue':
+        value['issues'][0]['issue_text']+=' và anh A đã đe dọa chị B bằng vũ lực'
+        value['issues'][0]['decisive_fact']+=' và anh A đã đe dọa chị B bằng vũ lực'
+    else:value['issues'][0]['explain']+=' Anh A đã đe dọa chị B bằng vũ lực.'
+    revised=deepcopy(value);revised['responses_to_feedback']=response()['responses_to_feedback']
+    adverse=critique('UNSUPPORTED_FACT')
+    adverse['per_issue_reviews'][0][where+'_supported']=False
+    adverse['generator_visible_feedback'][0]['explanation']='Không có tình tiết đe dọa bằng vũ lực trong facts_clean; loại bỏ chi tiết này khỏi cặp issue/explain.'
+    final=deepcopy(adverse);final['rebuttal_assessments']=[assessment('UPHOLD')]
+    c=controller(config,[value,revised],[adverse,final])
+    result=await c.run(record)
+    assert result.status.value=='REJECTED' and result.audit['rounds']==1
+    assert result.audit['final_judge']['per_issue_reviews'][0]['error_codes']==['UNSUPPORTED_FACT']
+    assert_judge_isolated(c.judge.client.messages,record)
 
 
-async def test_generator_must_verify_application_and_conclusion(config,record):
-    value=gen_data();value['private_judicial_support'][0]['application_evidence_quotes']=['NOT_IN_APPLICATION']
-    with pytest.raises(LLMError,match='quote absent'):
-        await GeneratorAgent(FakeClient([value]),config).generate(record)
+async def test_unresolved_generator_scope_is_rejected_not_a_technical_failure(config,record):
+    config.max_debate_rounds=1
     value=gen_data();value['private_judicial_support'][0]['conclusion_consistent']=False
-    with pytest.raises(LLMError,match='conclusion-consistent'):
-        await GeneratorAgent(FakeClient([value]),config).generate(record)
+    result=await controller(config,[value,deepcopy(value)],[judge_data(),judge_data()]).run(record)
+    assert result.status.value=='REJECTED'
+    assert any('Generator scope unresolved' in x for x in result.audit['rejection_reasons'])
 
 
 async def test_valid_issue_with_unsupported_explain_is_rejected_by_judge(config,record):
@@ -142,26 +152,26 @@ async def test_removing_bad_issue_does_not_break_previous_feedback_ids(config,re
     assert (await c.run(record)).status.value=='COMPLETED'
 
 
-async def test_private_quote_copied_into_public_explain_is_blocked_before_judge(config,record,generator_output):
-    generator_output.issues[0].explain+=' '+APPLICATION
-    with pytest.raises(ValueError,match='Private judicial evidence'):
-        public_candidate(generator_output,FACTS)
-    with pytest.raises(LLMError,match='Private judicial evidence'):
-        await GeneratorAgent(FakeClient([generator_output.model_dump(mode='json')]),config).generate(record)
+async def test_private_scope_notes_are_never_projected(config,record,generator_output):
+    generator_output.private_judicial_support[0].explanation+=' '+APPLICATION+' '+CONCLUSION
+    public=public_candidate(generator_output,FACTS).model_dump(mode='json')
+    text=json.dumps(public)
+    assert 'APP_ONLY_SENTINEL_847' not in text and 'CONCLUSION_ONLY_SENTINEL_219' not in text
+    assert set(public)=={'issues','responses_to_feedback'}
 
 
-async def test_private_evidence_in_typed_history_is_rejected_before_http(config,generator_output):
-    from legal_issue_pipeline.schemas import SafeFeedback, ErrorCode
-    history=SafeHistory(feedback=[SafeFeedback(feedback_id='F1',issue_ids=['I1'],error_code=ErrorCode.UNSUPPORTED_FACT,
-        action='REVISE',facts_evidence_quotes=[APPLICATION])],responses=[],assessments=[])
+async def test_private_metadata_cannot_be_added_to_filtered_history(config,generator_output):
+    from pydantic import ValidationError
+    history={'feedback':[],'responses':[],'assessments':[], 'private_judicial_support':APPLICATION}
+    with pytest.raises(ValidationError):SafeHistory.model_validate_json(json.dumps(history))
     judge=JudgeAgent(FakeClient([]),config)
-    with pytest.raises(ValueError,match='quote absent'):
+    with pytest.raises(TypeError):
         await judge.evaluate(FACTS,public_candidate(generator_output,FACTS),None,None,[history])
     assert judge.client.messages==[]
 
 
 async def test_missing_core_inventory_cannot_pass(config,generator_output):
     value=judge_data();value['coverage_analysis'].append(dict(coverage_id='C2',issue_text='Việc xác định quyền trực tiếp nuôi con của anh A khi anh A yêu cầu nuôi con',
-        facts_evidence_quotes=[FACTS],matched_issue_ids=[]))
+        explanation='Một câu hỏi trung tâm chưa được candidate đề cập.',matched_issue_ids=[]))
     with pytest.raises(ValueError,match='Missing facts-supported CORE'):
         JudgeAgent(FakeClient([]),config).validate_judgment(JudgeOutput.model_validate_json(json.dumps(value)),FACTS,public_candidate(generator_output,FACTS),None)

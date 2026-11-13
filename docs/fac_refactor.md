@@ -1,3 +1,5 @@
+> Historical v3 report. Current quote-free semantic contract and commands: [semantic_grounding.md](semantic_grounding.md).
+
 # Báo cáo refactor FAC: full-judgment Generator, facts-only Judge
 
 > Đây là báo cáo kiểm chứng của lần refactor ban đầu. Fix startup few-shot tiếp theo (sửa một nhãn reference và dùng span IDs thay quote do model chép) ở [fewshot_startup_fix.md](fewshot_startup_fix.md); bản án/facts gốc vẫn giữ nguyên.

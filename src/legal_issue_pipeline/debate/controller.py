@@ -4,7 +4,7 @@ from ..agents.generator import GeneratorAgent
 from ..agents.judge import FeedbackFirewall, JudgeAgent, public_candidate
 from ..config import PipelineConfig
 from ..llm.base_client import LLMError
-from ..schemas import SafeHistory
+from ..schemas import SafeHistory, CONTRACT_VERSION
 from ..validators.format_validator import candidate_errors
 from ..validators.judge_validator import scope_rubric_passes, RUBRIC_CRITERIA
 from .state import CaseStatus, DebateResult, EvaluatedCandidate
@@ -19,9 +19,11 @@ class DebateController:
 
     def _required_validations_passed(self, candidate: EvaluatedCandidate) -> bool:
         return (not candidate.errors and self.config.enable_coverage_check
-                and self.config.enable_evidence_validation and self.config.strict_format
+                and self.config.strict_format
                 and self.config.enable_deduplication and self.config.enable_judge_reconsideration
-                and self.config.enable_generator_rebuttal)
+                and self.config.enable_generator_rebuttal
+                and all(s.judicial_relevance_confirmed and s.conclusion_consistent
+                        for s in candidate.output.private_judicial_support))
 
     def _approved(self, candidate: EvaluatedCandidate) -> bool:
         return self._required_validations_passed(candidate) and scope_rubric_passes(candidate.judgment)
@@ -72,7 +74,7 @@ class DebateController:
                 break
             feedback, assessments = FeedbackFirewall.project(judgment, facts, public)
             revised = await self.generator.revise(record, current, feedback, assessments, history)
-            # Neither full Generator output nor private judicial evidence crosses here.
+            # Only public issues/explains and facts_arguments cross to Judge.
             safe_revised = public_candidate(revised, facts)
             history.append(SafeHistory(feedback=feedback, responses=safe_revised.responses_to_feedback, assessments=assessments))
             previous, current = judgment, revised
@@ -91,11 +93,14 @@ class DebateController:
                                   if getattr(final.judgment.rubric,key) != "PASS"]
             if not self._required_validations_passed(final):
                 rejection_reasons.append("A required validation was disabled or failed")
+            rejection_reasons += [f"Generator scope unresolved for {s.issue_id}: {s.explanation}"
+                                  for s in final.output.private_judicial_support
+                                  if not s.judicial_relevance_confirmed or not s.conclusion_consistent]
             rejection_reasons += final.judgment.unresolved_disputes
             rejection_reasons += [r.explanation for r in final.judgment.per_issue_reviews if r.verdict != "PASS"]
             rejection_reasons += [f.explanation for f in final.judgment.generator_visible_feedback]
             rejection_reasons = list(dict.fromkeys(rejection_reasons))
-        audit = {"contract": "fac_facts_only_v3", "status": "COMPLETED" if approved else "REJECTED",
+        audit = {"contract": CONTRACT_VERSION, "status": "COMPLETED" if approved else "REJECTED",
             "consensus": "PASS" if approved else "UNRESOLVED", "stop_reason": reason, "rounds": revisions,
             "judge_evaluations": len(candidates), "required_validations_passed": self._required_validations_passed(final),
             "needs_review": not approved, "final_issues": issues, "final_explain": explains,

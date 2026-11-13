@@ -3,12 +3,12 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 from legal_issue_pipeline.io.jsonl_reader import JSONLReader
-from legal_issue_pipeline.io.fewshot import FewShotBank
+from legal_issue_pipeline.io.fewshot import FewShotBank, FewShotGroundingError
 from legal_issue_pipeline.schemas import FewShotValidation, JudgeOutput
 from legal_issue_pipeline.validators.output_validator import make_output, validate_output
 from legal_issue_pipeline.validators.format_validator import candidate_errors
 from legal_issue_pipeline.validators.judge_validator import RUBRIC_CRITERIA, scope_rubric_passes
-from conftest import ROOT, FACTS, issue_data, judge_data, fewshot_report
+from conftest import ROOT, FACTS, judge_data, fewshot_report
 
 
 def test_actual_input_schema():
@@ -74,18 +74,18 @@ def test_fewshot_self_match_excluded_without_silent_answer_leak(config,record):
 def test_fewshot_unsupported_explain_blocks_reference_use(config):
     bank=FewShotBank(config.fewshot_path)
     data=fewshot_report(bank.examples);data['checks'][0]['explain_supported']=False
-    with pytest.raises(ValueError,match='Unsupported few-shot'):
+    with pytest.raises(FewShotGroundingError,match='Unsupported few-shot'):
         bank.validate_report(FewShotValidation.model_validate_json(json.dumps(data)))
     data['checks']=[]
     with pytest.raises(ValueError,match='every issue/explain pair'):
         bank.validate_report(FewShotValidation.model_validate_json(json.dumps(data)))
 
 
-@pytest.mark.parametrize('corruption',['missing','bad_quote','wrong_count'])
+@pytest.mark.parametrize('corruption',['missing','empty_label','wrong_count'])
 def test_invalid_fewshot_file_is_not_silently_used(config,tmp_path,corruption):
     rows=[json.loads(line) for line in config.fewshot_path.read_text().splitlines()]
     if corruption=='missing':rows[0]['benchmark_seed']['facts_clean']=''
-    if corruption=='bad_quote':rows[0]['issues'][0]['explain']='Theo application, Tòa đã tuyên thắng kiện.'
+    if corruption=='empty_label':rows[0]['issues'][0]['explain']=''
     if corruption=='wrong_count':rows.pop()
     path=tmp_path/'bad.jsonl';path.write_text('\n'.join(json.dumps(x,ensure_ascii=False) for x in rows))
     with pytest.raises(ValueError):FewShotBank(path)
@@ -104,12 +104,12 @@ def test_judge_schema_cannot_acquire_old_private_fields():
     with pytest.raises(ValidationError):JudgeOutput.model_validate_json(json.dumps(data))
 
 
-def test_format_and_explanation_grounding(config,generator_output):
+def test_format_is_mechanical_and_explanation_content_is_left_to_judge(config,generator_output):
     assert not candidate_errors(generator_output,FACTS,config)
-    generator_output.issues[0].explanation_evidence_quotes=['NOT_IN_FACTS']
-    assert any('UNSUPPORTED_FACT' in x for x in candidate_errors(generator_output,FACTS,config))
     generator_output.issues[0].explain='Tòa án nhận định và đã giải quyết yêu cầu này.'
-    assert any('INVALID_EXPLANATION' in x for x in candidate_errors(generator_output,FACTS,config))
+    assert not candidate_errors(generator_output,FACTS,config)
+    generator_output.issues[0].issue_text='Câu hỏi không đúng cấu trúc và tiền tố yêu cầu'
+    assert any('INVALID_FORMAT' in x for x in candidate_errors(generator_output,FACTS,config))
 
 
 @pytest.mark.parametrize('line',['null','', '{"doc_name":"x","doc_name":"y"}', '{"doc_name":"x","bad":NaN}'])
@@ -145,4 +145,4 @@ def test_safe_history_ids_cannot_be_a_private_text_channel():
     from legal_issue_pipeline.schemas import SafeFeedback
     with pytest.raises(ValidationError):
         SafeFeedback.model_validate_json(json.dumps(dict(feedback_id='F1',issue_ids=['APPLICATION_ONLY_SECRET'],
-            error_code='UNSUPPORTED_FACT',action='REVISE',facts_evidence_quotes=[FACTS])))
+            error_code='UNSUPPORTED_FACT',action='REVISE',explanation='Phần chỉ dẫn này không chứa ID của một issue hợp lệ.')))

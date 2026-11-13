@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from ..config import PipelineConfig
 from ..schemas import GeneratorOutput, Issue
-from .evidence_validator import validate_quotes
 
 PREFIXES = {
     "LIABILITY": ("Trách nhiệm pháp lý", "Trách nhiệm hình sự", "Trách nhiệm hành chính", "Trách nhiệm dân sự", "Trách nhiệm bồi thường thiệt hại"),
@@ -26,14 +25,8 @@ def issue_errors(issue: Issue, facts_clean: str, config: PipelineConfig) -> list
             errors.append(f"INVALID_FORMAT:{issue.issue_id}:metadata not present in issue_text")
         elif len(parts) == 2 and (issue.subject_action not in parts[0] or issue.decisive_fact not in parts[1]):
             errors.append(f"INVALID_FORMAT:{issue.issue_id}:component order")
-    if config.enable_evidence_validation:
-        try:
-            validate_quotes(issue.facts_evidence_quotes, facts_clean, issue.issue_id)
-            validate_quotes(issue.explanation_evidence_quotes, facts_clean, issue.issue_id+" explanation")
-        except ValueError:
-            errors.append(f"UNSUPPORTED_FACT:{issue.issue_id}:non-verbatim facts_clean evidence")
-    if any(text in issue.explain.casefold() for text in ("theo application", "theo conclusion", "tòa án nhận định", "tòa đã tuyên", "hội đồng xét xử nhận định")):
-        errors.append(f"INVALID_EXPLANATION:{issue.issue_id}:judicial reasoning/outcome reference")
+    # Grounding and explanation content are semantic Judge findings.  Only
+    # structure/prefix/component alignment is checked mechanically here.
     return errors
 
 

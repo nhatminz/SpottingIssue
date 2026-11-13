@@ -56,8 +56,9 @@ class BaseAgent:
                     validate(parsed)
                 return parsed
             except (ValueError, ValidationError) as exc:
-                # Only error type/field locations, never reflect Judge's private text
-                # into another role's prompts. Retry remains within the same agent.
+                # Repair JSON/schema/ID/format contradictions within this same
+                # agent. Semantic REVISE/REMOVE findings use the debate path;
+                # paraphrasing is never a parse/validation error.
                 if isinstance(exc, ValidationError):
                     detail = [{"loc": list(e["loc"]), "type": e["type"]} for e in exc.errors()]
                 else:
@@ -66,5 +67,5 @@ class BaseAgent:
                 if attempt == self.config.max_json_repair_retries:
                     raise LLMError(f"{type(self).__name__}: structured validation exhausted: {detail}") from None
                 messages.extend([{"role": "assistant", "content": completion.content},
-                                 {"role": "user", "content": "Repair your JSON; preserve supported facts only. Errors: "+json.dumps(detail,ensure_ascii=False)}])
+                                 {"role": "user", "content": "Repair JSON/schema, IDs and structural consistency. Preserve supported meaning; do not change a semantic judgment merely to obtain PASS. Errors: "+json.dumps(detail,ensure_ascii=False)}])
         raise AssertionError("unreachable")

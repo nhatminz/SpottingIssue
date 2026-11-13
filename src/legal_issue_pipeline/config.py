@@ -89,7 +89,6 @@ class PipelineConfig(BaseModel):
     # Legacy policies are normalized; neither can export unapproved candidates.
     unresolved_policy: Literal["reject", "stop", "continue"] = "reject"
     strict_format: bool = True
-    enable_evidence_validation: bool = True
     enable_deduplication: bool = True
     enable_coverage_check: bool = True
     max_json_repair_retries: int = Field(2, ge=0, le=10)

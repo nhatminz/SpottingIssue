@@ -38,7 +38,7 @@ async def test_b200_notarization_error_is_fixed_without_bypassing_grounding(conf
             # This is the exact defect reported by the real B200 run, not a
             # general regex claimed to prove semantic grounding.
             if 'công chứng' in commercial['issues'][2] and 'công chứng' not in commercial['facts_clean'].casefold():
-                check.update(issue_supported=False,facts_span_ids=[],explanation='Issue nêu hợp đồng thế chấp đã được công chứng, nhưng facts_clean chỉ ghi hợp đồng được ký, không xác lập công chứng.')
+                check.update(issue_supported=False,explanation='Issue nêu hợp đồng thế chấp đã được công chứng, nhưng facts_clean chỉ ghi hợp đồng được ký, không xác lập công chứng.')
             assert 'facts_evidence_quotes' not in json.dumps(answer)
         elif 'benchmark_seed' in payload:
             calls.append('generate');answer=gen_data()
@@ -72,10 +72,9 @@ async def test_b200_notarization_error_is_fixed_without_bypassing_grounding(conf
         summary=await PipelineRunner(config,factory).run()
         assert calls==['approval','generate','judge'] and summary['accepted']==1
         saved=json.loads((config.audit_dir/'fewshot_validation.json').read_text())
-        assert saved['method']=='source_span_ids_v1' and saved['review']['checks']
-        raw={x['example_id']:x['facts_clean'] for x in payload_examples(config)}
-        for check in saved['report']['checks']:
-            assert all(quote in raw[check['example_id']] for quote in check['facts_evidence_quotes'])
+        assert saved['method']=='semantic_grounding_v1' and saved['review']['checks']
+        assert saved['report']==saved['review']
+        assert all(c['issue_supported'] and c['explain_supported'] for c in saved['report']['checks'])
         def never():raise AssertionError('Cached approval or completed record recomputed')
         resumed=await PipelineRunner(config,never).run()
         assert resumed['accepted']==1 and calls==['approval','generate','judge']
