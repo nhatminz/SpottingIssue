@@ -13,7 +13,7 @@ PREFIXES = {
 }
 
 
-def issue_errors(issue: Issue, situation: str, config: PipelineConfig) -> list[str]:
+def issue_errors(issue: Issue, facts_clean: str, config: PipelineConfig) -> list[str]:
     errors = []
     if config.strict_format:
         text = issue.issue_text
@@ -28,14 +28,17 @@ def issue_errors(issue: Issue, situation: str, config: PipelineConfig) -> list[s
             errors.append(f"INVALID_FORMAT:{issue.issue_id}:component order")
     if config.enable_evidence_validation:
         try:
-            validate_quotes(issue.situation_evidence_quotes, situation, issue.issue_id)
+            validate_quotes(issue.facts_evidence_quotes, facts_clean, issue.issue_id)
+            validate_quotes(issue.explanation_evidence_quotes, facts_clean, issue.issue_id+" explanation")
         except ValueError:
-            errors.append(f"UNSUPPORTED_FACT:{issue.issue_id}:non-verbatim evidence")
+            errors.append(f"UNSUPPORTED_FACT:{issue.issue_id}:non-verbatim facts_clean evidence")
+    if any(text in issue.explain.casefold() for text in ("theo application", "theo conclusion", "tòa án nhận định", "tòa đã tuyên", "hội đồng xét xử nhận định")):
+        errors.append(f"INVALID_EXPLANATION:{issue.issue_id}:judicial reasoning/outcome reference")
     return errors
 
 
-def candidate_errors(output: GeneratorOutput, situation: str, config: PipelineConfig) -> list[str]:
-    errors = [e for issue in output.issues for e in issue_errors(issue, situation, config)]
+def candidate_errors(output: GeneratorOutput, facts_clean: str, config: PipelineConfig) -> list[str]:
+    errors = [e for issue in output.issues for e in issue_errors(issue, facts_clean, config)]
     ids = [i.issue_id for i in output.issues]
     if len(set(ids)) != len(ids):
         errors.append("INVALID_FORMAT:duplicate issue_id")

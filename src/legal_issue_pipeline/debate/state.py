@@ -23,6 +23,6 @@ class EvaluatedCandidate:
 @dataclass
 class DebateResult:
     issues: list[str]
-    situation_error: bool
+    explain: list[str]
     status: CaseStatus
     audit: dict = field(default_factory=dict)

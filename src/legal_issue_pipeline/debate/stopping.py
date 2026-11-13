@@ -15,13 +15,13 @@ class StagnationDetector:
         self.signals: list[str] = []
 
     def observe(self, candidate: GeneratorOutput, judge: JudgeOutput) -> bool:
-        evidence = {q for i in candidate.issues for q in i.situation_evidence_quotes}
-        evidence |= {q for f in judge.generator_visible_feedback for q in f.situation_evidence_quotes}
-        signature = digest({"issues": sorted((i.focus_group, i.focus, i.subject_action, i.decisive_fact,
-                                              sorted(i.situation_evidence_quotes)) for i in candidate.issues),
-                            "feedback": sorted((f.error_code.value, f.action, sorted(f.situation_evidence_quotes)) for f in judge.generator_visible_feedback),
-                            "rebuttal": sorted((r.decision, sorted(r.situation_evidence_quotes)) for r in candidate.responses_to_feedback),
-                            "assessments": sorted((a.decision, sorted(a.situation_evidence_quotes)) for a in judge.rebuttal_assessments),
+        evidence = {q for i in candidate.issues for q in i.facts_evidence_quotes}
+        evidence |= {q for f in judge.generator_visible_feedback for q in f.facts_evidence_quotes}
+        signature = digest({"issues": sorted((i.focus_group, i.focus, i.subject_action, i.decisive_fact, i.explain,
+                                              sorted(i.facts_evidence_quotes)) for i in candidate.issues),
+                            "feedback": sorted((f.error_code.value, f.action, sorted(f.facts_evidence_quotes)) for f in judge.generator_visible_feedback),
+                            "rebuttal": sorted((r.decision, sorted(r.facts_evidence_quotes)) for r in candidate.responses_to_feedback),
+                            "assessments": sorted((a.decision, sorted(a.facts_evidence_quotes)) for a in judge.rebuttal_assessments),
                             "verdict": judge.overall_verdict})
         signals = []
         if signature in self.signatures:

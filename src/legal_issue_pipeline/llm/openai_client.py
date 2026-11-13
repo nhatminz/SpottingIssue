@@ -46,22 +46,43 @@ class OpenAICompatibleClient:
             DeepSeekVLLMAdapter.validate_body(body)
         return body
 
-    def _check_context(self, body: dict) -> None:
+    async def _check_context(self, body: dict) -> None:
         messages = body["messages"]
         if self.tokenizer is not None:
             # Schema is already embedded in the system message.
-            length = len(self.tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True))
+            length = len(self.tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True,
+                         **body.get("chat_template_kwargs", {})))
             method = "tokenizer"
         else:
             # Conservative bound: byte-fallback tokenizers cannot exceed one token/byte.
             length = sum(len(m["content"].encode("utf-8")) + 32 for m in messages)
             method = "utf8_byte_upper_bound"
+            remote = self.config.token_count_method == "vllm" or (
+                self.config.token_count_method == "auto" and self.agent.backend == "deepseek_vllm")
+            if remote:
+                base = self.agent.api_base.rstrip("/").removesuffix("/v1")
+                tokenize_body = {"model": body["model"], "messages": messages, "add_generation_prompt": True}
+                if "chat_template_kwargs" in body:
+                    tokenize_body["chat_template_kwargs"] = body["chat_template_kwargs"]
+                try:
+                    async with self.semaphore:
+                        response = await self.http.post(base+"/tokenize", json=tokenize_body,
+                            headers={"Authorization": "Bearer "+self.agent.api_key.get_secret_value()},
+                            timeout=min(30, self.agent.timeout or self.config.api_request_timeout))
+                    count = response.json().get("count") if response.status_code == 200 else None
+                    if type(count) is not int or count <= 0:
+                        raise ValueError("tokenization unavailable or invalid count")
+                    length, method = count, "vllm_tokenize"
+                except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+                    if self.config.token_count_method == "vllm":
+                        raise LLMError("vLLM tokenization failed; no text was truncated") from None
+                    log.warning("%s /tokenize unavailable; using conservative UTF-8 byte upper bound", self.role)
         if length > self.config.max_input_tokens or length + body["max_tokens"] > self.config.max_context_tokens:
             raise ContextLimitError(f"Context too large ({length}, method={method}); no text was truncated")
 
     async def complete(self, messages: list[dict], schema: dict) -> Completion:
         body = self.build_body(messages, schema)
-        self._check_context(body)
+        await self._check_context(body)
         headers = {"Authorization": "Bearer " + self.agent.api_key.get_secret_value()}
         request_id = uuid4().hex
         start = time.monotonic()

@@ -36,6 +36,14 @@ class CheckpointManager:
         if not self.get(index):
             self.set(index, case_id, "PENDING")
 
+    def metadata(self, key: str):
+        row = self.db.execute("SELECT value FROM metadata WHERE key=?", (key,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def set_metadata(self, key: str, value):
+        with self.db:
+            self.db.execute("INSERT OR REPLACE INTO metadata VALUES (?,?)", (key, json.dumps(value, ensure_ascii=False)))
+
     def get(self, index: int) -> dict | None:
         row = self.db.execute("SELECT idx,case_id,status,output,audit,error FROM records WHERE idx=?", (index,)).fetchone()
         if not row:

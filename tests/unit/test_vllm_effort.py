@@ -119,7 +119,7 @@ async def test_real_http_body_and_sanitized_audit_preserve_numeric_effort(config
         await client.close()
 
 
-async def test_60_request_limit_is_shared_across_both_roles(config):
+async def test_40_request_limit_is_shared_across_both_roles(config):
     active = peak = requests = 0
     full_wave = asyncio.Event()
     async def handler(request):
@@ -127,7 +127,7 @@ async def test_60_request_limit_is_shared_across_both_roles(config):
         active += 1
         requests += 1
         peak = max(peak, active)
-        if active == 60:
+        if active == 40:
             full_wave.set()
         try:
             await asyncio.wait_for(full_wave.wait(), timeout=5)
@@ -135,11 +135,11 @@ async def test_60_request_limit_is_shared_across_both_roles(config):
             return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}]})
         finally:
             active -= 1
-    semaphore = asyncio.Semaphore(60)
+    semaphore = asyncio.Semaphore(40)
     clients = [OpenAICompatibleClient(getattr(config, role), config, semaphore, role, httpx.MockTransport(handler))
                for role in ["gen", "judge"]]
     try:
         await asyncio.gather(*(clients[index % 2].complete([{"role": "user", "content": "test"}], {}) for index in range(100)))
-        assert peak == 60 and requests == 100
+        assert peak == 40 and requests == 100
     finally:
         await asyncio.gather(*(client.close() for client in clients))

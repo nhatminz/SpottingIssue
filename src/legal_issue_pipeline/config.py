@@ -19,7 +19,7 @@ class AgentConfig(BaseModel):
     model: str = "DeepSeek-V4.1-Flash-1017"
     backend: Literal["deepseek_vllm", "deepseek", "generic"] = "deepseek_vllm"
     thinking_enabled: bool = True
-    thinking_effort: str | StrictInt = "xhigh"
+    thinking_effort: str | StrictInt = "high"
     # Generic Qwen supports a switch, not a guaranteed compute-effort dial.
     generic_thinking_style: Literal["qwen", "reasoning_effort", "none"] = "qwen"
     supported_efforts: list[str] = Field(default_factory=lambda: ["low", "high", "xhigh", "max"])
@@ -58,7 +58,7 @@ class AgentConfig(BaseModel):
 
 class PipelineConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    project_root: Path = Path(__file__).resolve().parents[2]
+    project_root: Path = Path("/workspace/storage-shared/nlp/minhpn19/LegalDataset")
     input_path: Path
     output_path: Path
     rejected_path: Path | None = None
@@ -66,18 +66,19 @@ class PipelineConfig(BaseModel):
     log_dir: Path
     checkpoint_dir: Path
     prompt_dir: Path
+    fewshot_path: Path | None = None
     resume: bool = True
     overwrite_output: bool = False
     cuda_visible_devices: str = ""
-    max_workers: int = Field(1, ge=1)
-    max_concurrent_requests: int = Field(1, ge=1)
-    batch_size: int = Field(8, ge=1)
+    max_workers: int = Field(40, ge=1)
+    max_concurrent_requests: int = Field(40, ge=1)
+    batch_size: int = Field(100, ge=1)
     start_index: int = Field(0, ge=0)
     limit: int = Field(0, ge=0)
     random_seed: int = 42
     gen: AgentConfig = Field(default_factory=AgentConfig)
     judge: AgentConfig = Field(default_factory=AgentConfig)
-    max_debate_rounds: int = Field(8, ge=1, le=100)
+    max_debate_rounds: int = Field(6, ge=1, le=6)
     enable_early_stop: bool = True
     enable_generator_rebuttal: bool = True
     enable_judge_reconsideration: bool = True
@@ -91,15 +92,14 @@ class PipelineConfig(BaseModel):
     enable_evidence_validation: bool = True
     enable_deduplication: bool = True
     enable_coverage_check: bool = True
-    enable_situation_audit: bool = True
-    situation_error_policy: Literal["material_missing", "material_missing_or_contradiction"] = "material_missing"
     max_json_repair_retries: int = Field(2, ge=0, le=10)
     require_structured_output: bool = True
     max_context_tokens: int = Field(262144, ge=1024)
     max_input_tokens: int = Field(100000, ge=512)
-    # Never silently truncate the judgment and then declare a verified situation.
+    # Never truncate full sources or facts and then declare verified labels.
     truncation_policy: Literal["error"] = "error"
     tokenizer_path: str | None = None
+    token_count_method: Literal["auto", "utf8_byte_upper_bound", "vllm"] = "auto"
     api_request_timeout: float = Field(300, gt=0)
     retry_backoff: float = Field(1, ge=0)
     retry_jitter: float = Field(0.25, ge=0)
@@ -117,11 +117,14 @@ class PipelineConfig(BaseModel):
         for name in ["project_root", "input_path", "output_path", "audit_dir", "log_dir", "checkpoint_dir", "prompt_dir"]:
             setattr(self, name, getattr(self, name).expanduser().resolve())
         self.rejected_path = (self.rejected_path or self.output_path.parent/"rejected_cases.jsonl").expanduser().resolve()
-        if len({self.input_path,self.output_path,self.rejected_path}) != 3:
+        self.fewshot_path = (self.fewshot_path or self.project_root/"input/fewshot.jsonl").expanduser().resolve()
+        if len({self.input_path,self.output_path,self.rejected_path,self.fewshot_path}) != 4:
             raise ValueError("Input, output and rejected paths must differ")
         for directory in [self.audit_dir, self.log_dir, self.checkpoint_dir]:
             if directory == self.input_path or directory in self.input_path.parents:
                 raise ValueError("Artifacts directory must not contain the input file")
+            if directory == self.fewshot_path or directory in self.fewshot_path.parents:
+                raise ValueError("Artifacts directory must not contain the few-shot file")
             if directory == self.output_path or directory in self.output_path.parents:
                 raise ValueError("Artifacts directory must not contain the main output file")
             if directory == self.rejected_path or directory in self.rejected_path.parents:
@@ -148,7 +151,7 @@ class PipelineConfig(BaseModel):
     def semantic_dict(self) -> dict:
         value = self.model_dump(mode="json")
         runtime = {"resume", "overwrite_output", "max_workers", "max_concurrent_requests", "batch_size", "cuda_visible_devices", "log_level", "dry_run", "fail_on_record_error", "save_raw_responses", "save_token_usage", "save_debate_history", "retry_backoff", "retry_jitter", "api_request_timeout"}
-        runtime |= {"project_root", "input_path", "output_path", "rejected_path", "audit_dir", "log_dir", "checkpoint_dir", "prompt_dir"}
+        runtime |= {"project_root", "input_path", "output_path", "rejected_path", "audit_dir", "log_dir", "checkpoint_dir", "prompt_dir", "fewshot_path"}
         for k in runtime:
             value.pop(k, None)
         for role in ["gen", "judge"]:
@@ -169,8 +172,8 @@ def _read_env(name: str, annotation: object, default: object):
 
 
 def load_config() -> PipelineConfig:
-    root = Path(os.environ.get("PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
-    paths = dict(project_root=root, input_path=root/"input/judgment_with_situation.jsonl", output_path=root/"output/judgment_with_issues.jsonl", audit_dir=root/"output/audit", log_dir=root/"output/logs", checkpoint_dir=root/"output/checkpoints", prompt_dir=root/"prompts")
+    root = Path(os.environ.get("PROJECT_ROOT", "/workspace/storage-shared/nlp/minhpn19/LegalDataset")).resolve()
+    paths = dict(project_root=root, input_path=root/"input/sample_input.jsonl", output_path=root/"output/judgment_with_issues.jsonl", audit_dir=root/"output/audit", log_dir=root/"output/logs", checkpoint_dir=root/"output/checkpoints", prompt_dir=root/"prompts", fewshot_path=root/"input/fewshot.jsonl")
     values = {}
     for name, field in PipelineConfig.model_fields.items():
         if name in ["gen", "judge"]:

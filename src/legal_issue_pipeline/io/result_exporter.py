@@ -8,6 +8,9 @@ from ..agents.base_agent import reject_duplicate_keys
 from ..config import PipelineConfig
 from ..validators.output_validator import validate_output
 from ..validators.judge_validator import scope_rubric_passes
+from ..schemas import GeneratorOutput
+from ..validators.format_validator import candidate_errors
+from ..validators.evidence_validator import validate_quotes
 from .jsonl_reader import JSONLReader
 from .jsonl_writer import JSONLWriter
 
@@ -20,14 +23,22 @@ class ResultExporter:
     def require_accepted(row: dict) -> None:
         audit = row["audit"]
         judge = audit.get("final_judge",{})
-        if (row["status"] != "COMPLETED" or row["output"] is None
+        if (audit.get("contract") != "fac_facts_only_v3" or row["status"] != "COMPLETED" or row["output"] is None
             or audit.get("consensus") != "PASS" or audit.get("required_validations_passed") is not True
             or judge.get("overall_verdict") != "PASS" or judge.get("unresolved_disputes")
             or not scope_rubric_passes(judge)
-            or judge.get("error_codes") or judge.get("generator_visible_feedback") or judge.get("suggested_missing_issues")
+            or judge.get("error_codes") or judge.get("generator_visible_feedback")
             or any(r.get("verdict") != "PASS" or r.get("error_codes") for r in judge.get("per_issue_reviews",[]))
-            or audit.get("final_issues") != row["output"].get("issues")):
+            or audit.get("final_issues") != row["output"].get("issues")
+            or audit.get("final_explain") != row["output"].get("explain")):
             raise ValueError("COMPLETED checkpoint lacks final Judge PASS and required validation proof")
+        generated = GeneratorOutput.model_validate_json(json.dumps(audit.get("final_generator", {})))
+        if ([i.issue_text for i in generated.issues] != row["output"]["issues"] or
+            [i.explain for i in generated.issues] != row["output"]["explain"] or
+            len(generated.private_judicial_support) != len(generated.issues) or
+            {s.issue_id for s in generated.private_judicial_support} != {i.issue_id for i in generated.issues} or
+            any(not s.judicial_relevance_confirmed or not s.conclusion_consistent for s in generated.private_judicial_support)):
+            raise ValueError("Missing Generator judicial-scope proof or issue/explain alignment")
 
     @staticmethod
     def rejected_case(row: dict) -> dict:
@@ -37,10 +48,10 @@ class ResultExporter:
         if not audit.get("feedback_history") or not audit.get("rejection_reasons"):
             raise ValueError("REJECTED checkpoint lacks reasons or mandatory feedback history")
         return {"case_id":row["case_id"],"input_index":row["index"],"doc_name":audit["doc_name"],
-                "status":"REJECTED","rounds":audit["rounds"],"issues":audit["final_issues"],
+                "status":"REJECTED","rounds":audit["rounds"],"issues":audit["final_issues"],"explain":audit["final_explain"],
                 "judge_verdict":audit["final_judge"]["overall_verdict"],"stop_reason":audit["stop_reason"],
                 "rejection_reasons":audit["rejection_reasons"],"feedback_history":audit["feedback_history"],
-                "situation_error":audit["situation_error"],"needs_review":audit.get("needs_review",True)}
+                "needs_review":audit.get("needs_review",True)}
 
     def write(self, rows: list[dict]) -> int:
         accepted, rejected = [], []
@@ -84,6 +95,12 @@ class ResultExporter:
                     raise ValueError("Checkpoint does not match selected input records")
                 if row["status"] == "COMPLETED":
                     self.require_accepted(row)
+                    generated = GeneratorOutput.model_validate_json(json.dumps(row["audit"]["final_generator"]))
+                    if candidate_errors(generated,record.data["benchmark_seed"]["facts_clean"],self.config):
+                        raise ValueError("Cached Generator candidate fails facts/format validation")
+                    for support in generated.private_judicial_support:
+                        validate_quotes(support.application_evidence_quotes,record.data["benchmark_seed"]["application"],"cached application")
+                        validate_quotes(support.conclusion_evidence_quotes,record.data["benchmark_seed"]["conclusion"],"cached conclusion")
                     emitted = self._next_object(output,"Main output")
                     validate_output(record.data,emitted)
                     if emitted != row["output"]:

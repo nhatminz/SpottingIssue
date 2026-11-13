@@ -1,8 +1,10 @@
-"""Only explicit, inspectable structured exchanges cross the agent boundary."""
+"""Separate full-judgment Generator output from the facts-only Judge contract."""
 from __future__ import annotations
 from enum import Enum
-from typing import Literal
+from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
+
+IssueId = Annotated[str, Field(pattern=r"^I[1-9][0-9]{0,5}$")]
 
 
 class Structured(BaseModel):
@@ -22,91 +24,124 @@ class ErrorCode(str, Enum):
     SUPPORTING_FACT = "SUPPORTING_FACT"
     ANCILLARY_ISSUE = "ANCILLARY_ISSUE"
     OUT_OF_SCOPE = "OUT_OF_SCOPE"
+    INVALID_EXPLANATION = "INVALID_EXPLANATION"
+    INCONSISTENT_EXPLANATION = "INCONSISTENT_EXPLANATION"
 
 
 class Issue(Structured):
-    issue_id: str = Field(min_length=1)
+    issue_id: IssueId
     issue_text: str = Field(min_length=10)
+    explain: str = Field(min_length=20, max_length=2000)
     focus_group: Literal["LIABILITY", "VALIDITY", "DETERMINATION", "PROCEDURE"]
     focus: str = Field(min_length=1)
     subject_action: str = Field(min_length=1)
     decisive_fact: str = Field(min_length=1)
-    situation_evidence_quotes: list[str] = Field(min_length=1)
-    importance: Literal["CORE", "RELATED"]
+    facts_evidence_quotes: list[str] = Field(min_length=1)
+    explanation_evidence_quotes: list[str] = Field(min_length=1)
+    importance: Literal["CORE"]
+
+
+class JudicialSupport(Structured):
+    issue_id: str = Field(pattern=r"^I[1-9][0-9]{0,5}$")
+    application_evidence_quotes: list[str] = Field(min_length=1)
+    conclusion_evidence_quotes: list[str] = Field(min_length=1)
+    judicial_relevance_confirmed: bool
+    conclusion_consistent: bool
+    explanation: str = Field(min_length=1, max_length=1500)
 
 
 class FeedbackResponse(Structured):
-    feedback_id: str
+    feedback_id: str = Field(pattern=r"^F[1-9][0-9]{0,5}$")
     decision: Literal["ACCEPT", "CONTEST", "PARTIALLY_ACCEPT"]
-    explanation: str = Field(min_length=1,max_length=1500)
-    situation_evidence_quotes: list[str]
+    explanation: str = Field(min_length=1, max_length=1500)
+    facts_evidence_quotes: list[str]
 
 
 class GeneratorOutput(Structured):
     issues: list[Issue]
     responses_to_feedback: list[FeedbackResponse]
+    private_judicial_support: list[JudicialSupport]
+
+
+class SafeResponse(Structured):
+    feedback_id: str = Field(pattern=r"^F[1-9][0-9]{0,5}$")
+    decision: Literal["ACCEPT", "CONTEST", "PARTIALLY_ACCEPT"]
+    facts_evidence_quotes: list[str]
+
+
+class PublicIssue(Structured):
+    issue_id: str = Field(pattern=r"^I[1-9][0-9]{0,5}$")
+    issue_text: str = Field(min_length=10)
+    explain: str = Field(min_length=20, max_length=2000)
+
+
+class JudgeCandidate(Structured):
+    issues: list[PublicIssue]
+    responses_to_feedback: list[SafeResponse]
 
 
 class Feedback(Structured):
-    feedback_id: str
-    issue_ids: list[str]
+    feedback_id: str = Field(pattern=r"^F[1-9][0-9]{0,5}$")
+    issue_ids: list[IssueId]
     error_code: ErrorCode
     action: Literal["REVISE", "REMOVE", "ADD", "SPLIT", "RECONSIDER"]
-    situation_evidence_quotes: list[str] = Field(min_length=1)
-    # Narrative is PRIVATE. The firewall forwards only enum/id/verified quotes.
-    explanation: str = Field(min_length=1,max_length=1500)
+    facts_evidence_quotes: list[str] = Field(min_length=1)
+    explanation: str = Field(min_length=1, max_length=1500)
 
 
-class IssueReview(Structured):
-    issue_id: str
-    classification: Literal["CORE", "SUPPORTING_FACT", "IRRELEVANT", "DUPLICATE"]
-    court_scope_confirmed: bool
-    markdown_evidence_quotes: list[str]
-    related_issue_ids: list[str]
-    verdict: Literal["PASS", "REVISE", "REMOVE", "NEEDS_REVIEW"]
-    error_codes: list[ErrorCode]
-    explanation: str = Field(min_length=1,max_length=1500)
-    situation_evidence_quotes: list[str]
+class SafeFeedback(Structured):
+    feedback_id: str = Field(pattern=r"^F[1-9][0-9]{0,5}$")
+    issue_ids: list[IssueId]
+    error_code: ErrorCode
+    action: Literal["REVISE", "REMOVE", "ADD", "SPLIT", "RECONSIDER"]
+    facts_evidence_quotes: list[str]
 
 
 class RebuttalAssessment(Structured):
-    feedback_id: str
+    feedback_id: str = Field(pattern=r"^F[1-9][0-9]{0,5}$")
     decision: Literal["WITHDRAW", "UPHOLD", "PARTIALLY_WITHDRAW"]
-    explanation: str = Field(min_length=1,max_length=1500)
-    situation_evidence_quotes: list[str] = Field(min_length=1)
+    explanation: str = Field(min_length=1, max_length=1500)
+    facts_evidence_quotes: list[str] = Field(min_length=1)
 
 
-class FactFinding(Structured):
-    fact: str = Field(min_length=1)
-    markdown_evidence_quotes: list[str] = Field(min_length=1)
-    material: bool
-    importance_reason: str = Field(min_length=1)
-    affected_issue: str = Field(min_length=1)
-    equivalent_in_situation: bool
-    equivalence_assessment: str = Field(min_length=1)
+class SafeAssessment(Structured):
+    feedback_id: str = Field(pattern=r"^F[1-9][0-9]{0,5}$")
+    decision: Literal["WITHDRAW", "UPHOLD", "PARTIALLY_WITHDRAW"]
+    facts_evidence_quotes: list[str]
 
 
-class SituationAudit(Structured):
-    missing_facts: list[FactFinding]
-    contradictions: list[FactFinding]
-    needs_review: bool
-    explanation: str = Field(min_length=1,max_length=1500)
+class SafeHistory(Structured):
+    feedback: list[SafeFeedback]
+    responses: list[SafeResponse]
+    assessments: list[SafeAssessment]
+
+
+class IssueReview(Structured):
+    issue_id: IssueId
+    classification: Literal["CORE", "SUPPORTING_FACT", "IRRELEVANT", "DUPLICATE"]
+    related_issue_ids: list[IssueId]
+    verdict: Literal["PASS", "REVISE", "REMOVE", "NEEDS_REVIEW"]
+    error_codes: list[ErrorCode]
+    explanation: str = Field(min_length=1, max_length=1500)
+    facts_evidence_quotes: list[str] = Field(min_length=1)
 
 
 class EvaluationRubric(Structured):
+    grounding: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
     legal_relevance: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
     coverage: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
-    grounding: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
+    independence: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
     format: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
-    explanation: str = Field(min_length=1,max_length=1500)
+    explanation_quality: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
+    consistency: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
+    deduplication: Literal["PASS", "FAIL", "NEEDS_REVIEW"]
+    explanation: str = Field(min_length=1, max_length=1500)
 
 
 class CoverageItem(Structured):
-    coverage_id: str = Field(min_length=1)
+    coverage_id: str = Field(pattern=r"^C[1-9][0-9]{0,5}$")
     issue_text: str = Field(min_length=10)
-    situation_evidence_quotes: list[str] = Field(min_length=1)
-    markdown_evidence_quotes: list[str] = Field(min_length=1)
-    court_scope_confirmed: bool
+    facts_evidence_quotes: list[str] = Field(min_length=1)
     matched_issue_ids: list[str]
 
 
@@ -115,9 +150,8 @@ class BlindComparison(Structured):
     disposition: Literal["MATCHED", "MISSING", "EXCLUDED", "NEEDS_REVIEW"]
     coverage_issue_ids: list[str]
     matched_issue_ids: list[str]
-    situation_evidence_quotes: list[str] = Field(min_length=1)
-    markdown_evidence_quotes: list[str]
-    explanation: str = Field(min_length=1,max_length=1500)
+    facts_evidence_quotes: list[str] = Field(min_length=1)
+    explanation: str = Field(min_length=1, max_length=1500)
 
 
 class JudgeOutput(Structured):
@@ -127,27 +161,30 @@ class JudgeOutput(Structured):
     blind_comparison: list[BlindComparison]
     error_codes: list[ErrorCode]
     feedback: str = Field(max_length=1500)
-    suggested_missing_issues: list[Issue]
     generator_visible_feedback: list[Feedback]
     rebuttal_assessments: list[RebuttalAssessment]
-    situation_audit: SituationAudit
     overall_verdict: Literal["PASS", "REVISE", "NEEDS_REVIEW"]
     unresolved_disputes: list[str]
 
 
+class DiscoveryIssue(Structured):
+    issue_id: str = Field(pattern=r"^D[1-9][0-9]{0,5}$")
+    issue_text: str = Field(min_length=10)
+    facts_evidence_quotes: list[str] = Field(min_length=1)
+
+
 class DiscoveryOutput(Structured):
-    issues: list[Issue]
+    issues: list[DiscoveryIssue]
 
 
-class SafeFeedback(Structured):
-    feedback_id: str
-    issue_ids: list[str]
-    error_code: ErrorCode
-    action: Literal["REVISE", "REMOVE", "ADD", "SPLIT", "RECONSIDER"]
-    situation_evidence_quotes: list[str]
+class FewShotIssueCheck(Structured):
+    example_id: str
+    issue_index: int = Field(ge=0)
+    issue_supported: bool
+    explain_supported: bool
+    facts_evidence_quotes: list[str] = Field(min_length=1)
+    explanation: str = Field(min_length=1, max_length=1500)
 
 
-class SafeAssessment(Structured):
-    feedback_id: str
-    decision: Literal["WITHDRAW", "UPHOLD", "PARTIALLY_WITHDRAW"]
-    situation_evidence_quotes: list[str]
+class FewShotValidation(Structured):
+    checks: list[FewShotIssueCheck]

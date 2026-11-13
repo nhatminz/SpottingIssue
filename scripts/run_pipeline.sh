@@ -14,7 +14,8 @@ export DEEPSEEK_API_BASE="${DEEPSEEK_API_BASE:-http://172.29.62.173:8000/v1}"
 export DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-DeepSeek-V4.1-Flash-1017}"
 
 # Input/output: không sửa input. LIMIT=0 là toàn bộ; START_INDEX bắt đầu từ 0.
-export INPUT_PATH="${INPUT_PATH:-$PROJECT_ROOT/input/judgment_with_situation.jsonl}"
+export INPUT_PATH="${INPUT_PATH:-$PROJECT_ROOT/input/sample_input.jsonl}"
+export FEWSHOT_PATH="${FEWSHOT_PATH:-$PROJECT_ROOT/input/fewshot.jsonl}"
 export OUTPUT_PATH="${OUTPUT_PATH:-$PROJECT_ROOT/output/judgment_with_issues.jsonl}"
 # File riêng cho vụ bị loại; mặc định nằm cạnh OUTPUT_PATH, không trộn vào labels.
 export REJECTED_PATH="${REJECTED_PATH:-$(dirname -- "$OUTPUT_PATH")/rejected_cases.jsonl}"
@@ -29,12 +30,12 @@ export OVERWRITE_OUTPUT="${OVERWRITE_OUTPUT:-false}"
 # Giữ biến caller đã đặt; mặc định rỗng. TOKENIZER_PATH rỗng => không cần Torch.
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES-}"
 # Số bản án được xử lý đồng thời; một worker giữ một vụ qua toàn bộ debate.
-export MAX_WORKERS="${MAX_WORKERS:-60}"
+export MAX_WORKERS="${MAX_WORKERS:-40}"
 # Tổng số HTTP inference requests đang chờ response, tính chung Generator/Judge.
-export MAX_CONCURRENT_REQUESTS="${MAX_CONCURRENT_REQUESTS:-60}"
+export MAX_CONCURRENT_REQUESTS="${MAX_CONCURRENT_REQUESTS:-40}"
 # Số bản án trong một đợt; xong cả đợt mới đưa đợt kế tiếp vào xử lý.
 # Không phải batch GPU/token của server. Nên >= MAX_WORKERS để tận dụng workers.
-# 100 vụ/đợt: tối đa 60 vụ chạy, các vụ còn lại chờ và lấp chỗ worker vừa xong.
+# 100 vụ/đợt: tối đa 40 vụ chạy, các vụ còn lại chờ worker vừa xong.
 export BATCH_SIZE="${BATCH_SIZE:-100}"
 # Index bản ghi đầu tiên trong INPUT (0-based): 0=dòng 1; 100=dòng 101.
 export START_INDEX="${START_INDEX:-0}"
@@ -55,7 +56,7 @@ export GEN_API_KEY_FILE="${GEN_API_KEY_FILE:-}"
 export GEN_MODEL="${GEN_MODEL:-$DEEPSEEK_MODEL}"
 export GEN_BACKEND="${GEN_BACKEND:-deepseek_vllm}"
 export GEN_THINKING_ENABLED="${GEN_THINKING_ENABLED:-true}"
-export GEN_THINKING_EFFORT="${GEN_THINKING_EFFORT:-xhigh}"
+export GEN_THINKING_EFFORT="${GEN_THINKING_EFFORT:-high}"
 # Trần token SINH MỚI của MỖI request Generator, gửi thành max_tokens tới API.
 # Thinking + final JSON dùng budget này theo cách tính của backend.
 # Mỗi lượt có budget 131073 riêng; không trừ token đã dùng ở lượt trước.
@@ -80,7 +81,7 @@ export JUDGE_API_KEY_FILE="${JUDGE_API_KEY_FILE:-}"
 export JUDGE_MODEL="${JUDGE_MODEL:-$DEEPSEEK_MODEL}"
 export JUDGE_BACKEND="${JUDGE_BACKEND:-deepseek_vllm}"
 export JUDGE_THINKING_ENABLED="${JUDGE_THINKING_ENABLED:-true}"
-export JUDGE_THINKING_EFFORT="${JUDGE_THINKING_EFFORT:-xhigh}"
+export JUDGE_THINKING_EFFORT="${JUDGE_THINKING_EFFORT:-high}"
 # Trần token SINH MỚI của MỖI request Judge; độc lập với budget của Generator.
 # Mỗi lượt có budget 131073 riêng; không chia sẻ với Generator hoặc các vòng khác.
 export JUDGE_MAX_OUTPUT_TOKENS="${JUDGE_MAX_OUTPUT_TOKENS:-131073}"
@@ -98,15 +99,15 @@ export JUDGE_EXTRA_BODY="${JUDGE_EXTRA_BODY:-}"
 if [[ -z "$JUDGE_EXTRA_BODY" ]]; then export JUDGE_EXTRA_BODY='{}'; fi
 
 # Debate: N cycles Judge -> Generator, luôn thêm final Judge sau lần sửa cuối.
-# MAX_DEBATE_ROUNDS mặc định 8; production có thể chỉnh 5–10.
+# Tối đa 6 lượt Judge -> Generator, rồi final Judge; không có lần sửa thứ 7.
 # FINALIZE_POLICY chỉ chọn candidate trong private audit, không quyết định output.
 # UNRESOLVED_POLICY=reject: bỏ vụ không đạt, lưu riêng, tiếp tục vụ kế tiếp.
 # Giá trị cũ stop/continue được chuyển thành reject có warning.
-export MAX_DEBATE_ROUNDS="${MAX_DEBATE_ROUNDS:-8}"
+export MAX_DEBATE_ROUNDS="${MAX_DEBATE_ROUNDS:-6}"
 export ENABLE_EARLY_STOP="${ENABLE_EARLY_STOP:-true}"
 export ENABLE_GENERATOR_REBUTTAL="${ENABLE_GENERATOR_REBUTTAL:-true}"
 export ENABLE_JUDGE_RECONSIDERATION="${ENABLE_JUDGE_RECONSIDERATION:-true}"
-# Stage A: situation-only request; Stage B: separate evaluation with full sources.
+# Optional discovery và mọi Judge request chỉ dùng facts_clean, không nhận bản án.
 export ENABLE_BLIND_JUDGE_DISCOVERY="${ENABLE_BLIND_JUDGE_DISCOVERY:-true}"
 export STOP_ON_STAGNATION="${STOP_ON_STAGNATION:-true}"
 export MAX_STAGNANT_ROUNDS="${MAX_STAGNANT_ROUNDS:-2}"
@@ -114,13 +115,10 @@ export FINALIZE_POLICY="${FINALIZE_POLICY:-best_valid}"
 export UNRESOLVED_POLICY="${UNRESOLVED_POLICY:-reject}"
 
 # Validation: tắt kiểm tra cốt lõi không đủ điều kiện xuất nhãn (REJECTED).
-# SITUATION_ERROR_POLICY: material_missing hoặc material_missing_or_contradiction.
 export STRICT_FORMAT="${STRICT_FORMAT:-true}"
 export ENABLE_EVIDENCE_VALIDATION="${ENABLE_EVIDENCE_VALIDATION:-true}"
 export ENABLE_DEDUPLICATION="${ENABLE_DEDUPLICATION:-true}"
 export ENABLE_COVERAGE_CHECK="${ENABLE_COVERAGE_CHECK:-true}"
-export ENABLE_SITUATION_AUDIT="${ENABLE_SITUATION_AUDIT:-true}"
-export SITUATION_ERROR_POLICY="${SITUATION_ERROR_POLICY:-material_missing}"
 export MAX_JSON_REPAIR_RETRIES="${MAX_JSON_REPAIR_RETRIES:-2}"
 export REQUIRE_STRUCTURED_OUTPUT="${REQUIRE_STRUCTURED_OUTPUT:-true}"
 
@@ -137,6 +135,10 @@ export MAX_CONTEXT_TOKENS="${MAX_CONTEXT_TOKENS:-262144}"
 export MAX_INPUT_TOKENS="${MAX_INPUT_TOKENS:-100000}"
 export TRUNCATION_POLICY="${TRUNCATION_POLICY:-error}"
 export TOKENIZER_PATH="${TOKENIZER_PATH:-}"
+# auto: tokenizer local nếu có; nếu backend vLLM dùng /tokenize chính xác.
+# Nếu /tokenize không sẵn, auto log và dùng byte upper bound, không tự cắt nguồn.
+# vllm: bắt buộc /tokenize; utf8_byte_upper_bound: guard bảo thủ cũ.
+export TOKEN_COUNT_METHOD="${TOKEN_COUNT_METHOD:-auto}"
 export API_REQUEST_TIMEOUT="${API_REQUEST_TIMEOUT:-300}"
 export RETRY_BACKOFF="${RETRY_BACKOFF:-1}"
 export RETRY_JITTER="${RETRY_JITTER:-0.25}"
@@ -154,6 +156,7 @@ export DRY_RUN="${DRY_RUN:-false}"
 export FAIL_ON_RECORD_ERROR="${FAIL_ON_RECORD_ERROR:-true}"
 
 [[ -f "$INPUT_PATH" ]] || { echo "Không tìm thấy INPUT_PATH: $INPUT_PATH" >&2; exit 2; }
+[[ -f "$FEWSHOT_PATH" ]] || { echo "Không tìm thấy FEWSHOT_PATH: $FEWSHOT_PATH" >&2; exit 2; }
 [[ -d "$PROMPT_DIR" ]] || { echo "Không tìm thấy PROMPT_DIR: $PROMPT_DIR" >&2; exit 2; }
 [[ -x "$PYTHON_BIN" ]] || { echo "Không tìm thấy Python >=3.10: $PYTHON_BIN; xem README.md" >&2; exit 2; }
 export PYTHONPATH="$PROJECT_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"

@@ -1,3 +1,5 @@
+> Historical contract: situation-only Generator / full-judgment Judge. Current FAC implementation and commands: [fac_refactor.md](fac_refactor.md).
+
 # Rubric CORE và blind discovery độc lập
 
 Bổ sung hiện tại: định nghĩa học thuật, năm tiêu chí CORE, phép kiểm tra tính độc lập và adapter vLLM được ghi tại [academic_scope_vllm.md](academic_scope_vllm.md). CORE có thể là vấn đề cần Tòa xác định độc lập dù các bên không tranh chấp; bốn trường rubric và schemas vẫn giữ nguyên.

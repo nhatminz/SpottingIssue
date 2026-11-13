@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from ..agents.base_agent import reject_duplicate_keys
+from .records import validate_record
 
 
 @dataclass
@@ -23,14 +24,7 @@ class JSONLReader:
                 try:
                     data = json.loads(line, object_pairs_hook=reject_duplicate_keys,
                                       parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Non-finite JSON number")))
-                    if not isinstance(data,dict):
-                        raise ValueError("Record must be an object")
-                    for key in ["situation", "markdown", "doc_name"]:
-                        if not isinstance(data.get(key),str) or not data[key].strip():
-                            raise ValueError(f"Missing or invalid {key}")
-                    for key in ["citations_law", "citations"]:
-                        if not isinstance(data.get(key),list) or any(not isinstance(x,dict) for x in data[key]):
-                            raise ValueError(f"Invalid {key}: expected list of objects")
+                    validate_record(data)
                 except (ValueError, TypeError) as exc:
                     raise ValueError(f"Input line {index+1}: {exc}") from None
                 stable = hashlib.sha256(f"{index}:{data['doc_name']}".encode()).hexdigest()[:16]

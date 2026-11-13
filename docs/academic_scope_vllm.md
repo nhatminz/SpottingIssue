@@ -1,3 +1,5 @@
+> Historical contract: situation-only Generator / full-judgment Judge. Current FAC implementation and commands: [fac_refactor.md](fac_refactor.md).
+
 # Định nghĩa Legal Issue, adapter vLLM và 60 vụ đồng thời
 
 ## Phạm vi prompts

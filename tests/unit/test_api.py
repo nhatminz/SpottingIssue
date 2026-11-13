@@ -18,6 +18,7 @@ def test_deepseek_mapping(config,requested,expected):
 
 
 def test_unsupported_effort_fail_or_explicit_fallback(config):
+    config.gen.thinking_effort="extra_high"
     config.gen.supported_efforts=["high"]
     with pytest.raises(ValueError,match="Unsupported"):
         DeepSeekAdapter().parameters(config.gen,config)

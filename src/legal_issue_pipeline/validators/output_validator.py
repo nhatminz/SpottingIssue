@@ -2,20 +2,25 @@ from __future__ import annotations
 from copy import deepcopy
 
 
-def make_output(original: dict, issues: list[str], situation_error: bool) -> dict:
+def make_output(original: dict, issues: list[str], explain: list[str]) -> dict:
+    if {"issues", "explain"} & original.keys():
+        raise ValueError("Input output-field conflict: issues/explain must not already exist")
     output = deepcopy(original)
-    output.update(issues=issues, situation_error=situation_error)
+    output.update(issues=list(issues), explain=list(explain))
     validate_output(original, output)
     return output
 
 
 def validate_output(original: dict, output: dict) -> None:
-    if set(output) != set(original) | {"issues", "situation_error"}:
-        raise ValueError("Output keys do not match original plus the two permitted fields")
-    for key,value in original.items():
-        if key not in {"issues", "situation_error"} and output.get(key) != value:
+    if {"issues", "explain"} & original.keys():
+        raise ValueError("Input already contains issues/explain")
+    if set(output) != set(original) | {"issues", "explain"}:
+        raise ValueError("Output must add exactly issues and explain")
+    for key, value in original.items():
+        if key not in output or output[key] != value:
             raise ValueError(f"Original field changed: {key}")
-    if type(output.get("situation_error")) is not bool:
-        raise ValueError("situation_error must be boolean")
-    if not isinstance(output.get("issues"), list) or any(not isinstance(i,str) or not i.strip() for i in output["issues"]):
-        raise ValueError("issues must be a list of nonempty strings")
+    for key in ("issues", "explain"):
+        if not isinstance(output.get(key), list) or any(not isinstance(x, str) or not x.strip() for x in output[key]):
+            raise ValueError(f"{key} must be a list of nonempty strings")
+    if len(output["issues"]) != len(output["explain"]):
+        raise ValueError("issues/explain lengths differ")
