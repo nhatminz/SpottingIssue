@@ -3,14 +3,26 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from copy import deepcopy
 from pathlib import Path
 from ..agents.base_agent import reject_duplicate_keys
 from ..validators.evidence_validator import validate_quotes
-from ..schemas import FewShotValidation
+from ..schemas import FewShotValidation, FewShotReview
+from ..llm.base_client import LLMError
 
 log = logging.getLogger(__name__)
 CATEGORIES = {"Marriage & Family", "Criminal", "Civil", "Commercial", "Administrative"}
+
+
+class FewShotGroundingError(LLMError):
+    """A valid review found unsupported reference content; JSON repair cannot fix it."""
+    def __init__(self, report: FewShotReview, findings: list[dict]):
+        self.report = report.model_dump(mode="json")
+        self.findings = findings
+        details = "\n".join(f"{x['example_id']} doc_name={x['doc_name']} issue_index={x['issue_index']} "
+                            f"(issue #{x['issue_index']+1}): {x['explanation']}" for x in findings)
+        super().__init__("Unsupported few-shot reference content; edit the reference issue/explain, not the facts.\n"+details)
 
 
 class FewShotBank:
@@ -55,6 +67,44 @@ class FewShotBank:
                 raise ValueError(f"Few-shot line {index+1}: {exc}") from None
         if len(self.examples) != 5 or {x["category"] for x in self.examples} != CATEGORIES:
             raise ValueError("Few-shot must contain exactly five examples, one for each required category")
+        self.fact_spans = {
+            example["example_id"]: [
+                {"span_id": f"{example['example_id']}-S{index+1}", "text": text}
+                for index, text in enumerate(match.group() for match in re.finditer(r"[^\r\n]+", example["facts_clean"])
+                                             if match.group().strip())]
+            for example in self.examples}
+
+    def validation_examples(self) -> list[dict]:
+        return [{**deepcopy(example), "facts_spans": deepcopy(self.fact_spans[example["example_id"]])}
+                for example in self.examples]
+
+    def resolve_review(self, review: FewShotReview) -> FewShotValidation:
+        expected = {(x["example_id"], index) for x in self.examples for index in range(len(x["issues"]))}
+        actual = [(x.example_id, x.issue_index) for x in review.checks]
+        if set(actual) != expected or len(actual) != len(expected):
+            raise ValueError("Few-shot review must cover every example/issue_index pair exactly once")
+        identities = {example["example_id"]: identity for example, identity in zip(self.examples, self.identities)}
+        by_id = {example["example_id"]: example for example in self.examples}
+        findings = [{**check.model_dump(mode="json"), "doc_name": identities[check.example_id]["doc_name"],
+                     "issue": by_id[check.example_id]["issues"][check.issue_index],
+                     "explain": by_id[check.example_id]["explain"][check.issue_index]}
+                    for check in review.checks if not check.issue_supported or not check.explain_supported]
+        # A semantic rejection is already actionable. Do not let citation/JSON
+        # repair hide it or pressure a later response to flip a false flag.
+        if findings:
+            raise FewShotGroundingError(review, findings)
+        checks = []
+        for check in review.checks:
+            source = {span["span_id"]: span["text"] for span in self.fact_spans[check.example_id]}
+            if (not check.facts_span_ids or len(check.facts_span_ids) != len(set(check.facts_span_ids))
+                    or set(check.facts_span_ids)-source.keys()):
+                raise ValueError(f"Unknown or duplicate facts_span_ids for {check.example_id} issue_index={check.issue_index}; "
+                                 "select only span_id values supplied for this example")
+            checks.append({**check.model_dump(exclude={"facts_span_ids"}),
+                           "facts_evidence_quotes": [source[key] for key in check.facts_span_ids]})
+        report = FewShotValidation.model_validate_json(json.dumps({"checks": checks}, ensure_ascii=False))
+        self.validate_report(report)
+        return report
 
     def for_record(self, record: dict) -> tuple[list[dict], list[str]]:
         selected, excluded = [], []

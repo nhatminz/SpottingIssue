@@ -122,7 +122,7 @@ async def test_40_workers_over_100_cases_and_stable_output(config,record):
 
 
 async def test_unsupported_fewshot_stops_before_examples_used_as_references(config,record):
-    from conftest import fewshot_report
+    from conftest import fewshot_review
     from legal_issue_pipeline.llm.base_client import Completion
     JSONLWriter(config.input_path).write([record])
     seen=[]
@@ -130,7 +130,7 @@ async def test_unsupported_fewshot_stops_before_examples_used_as_references(conf
         async def complete(self,messages,schema):
             payload=json.loads(messages[1]['content']);seen.append(payload)
             assert 'examples_to_audit' in payload
-            value=fewshot_report(payload['examples_to_audit']);value['checks'][0]['explain_supported']=False
+            value=fewshot_review(payload['examples_to_audit']);value['checks'][0]['explain_supported']=False
             return Completion(json.dumps(value),{},0,'approval')
     def make():return DebateController(GeneratorAgent(RejectingClient([]),config),JudgeAgent(FakeClient([]),config),config)
     with pytest.raises(LLMError,match='Unsupported few-shot'):

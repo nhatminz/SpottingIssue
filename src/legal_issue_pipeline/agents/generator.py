@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json
 import logging
-from ..schemas import GeneratorOutput, SafeFeedback, SafeAssessment, SafeHistory, FewShotValidation
+from ..schemas import GeneratorOutput, SafeFeedback, SafeAssessment, SafeHistory, FewShotValidation, FewShotReview
 from ..validators.evidence_validator import validate_quotes
 from ..validators.format_validator import candidate_errors
 from ..io.records import generator_sources
@@ -17,13 +17,22 @@ class GeneratorAgent(BaseAgent):
         self.revision_prompt = (config.prompt_dir/"generator_revision.md").read_text(encoding="utf-8")
         self.fewshot = fewshot or FewShotBank(config.fewshot_path)
         self.excluded_examples: list[str] = []
+        self.fewshot_review: dict | None = None
 
     async def validate_fewshot(self) -> FewShotValidation:
         # A Generator request, not a third role or a Judge request. Unapproved
         # examples are data to audit, never reference demonstrations yet.
         system = (self.config.prompt_dir/"generator_fewshot_validation.md").read_text(encoding="utf-8")
-        return await self.infer({"examples_to_audit": self.fewshot.examples}, FewShotValidation,
-                                validate=self.fewshot.validate_report, system_prompt_override=system)
+        report = None
+        def validate(review):
+            nonlocal report
+            self.fewshot_review = review.model_dump(mode="json")
+            report = self.fewshot.resolve_review(review)
+        await self.infer({"examples_to_audit": self.fewshot.validation_examples()}, FewShotReview,
+                         validate=validate, system_prompt_override=system)
+        if report is None:
+            raise AssertionError("Few-shot review returned without validation")
+        return report
 
     def _payload(self, record):
         examples, excluded = self.fewshot.for_record(record)

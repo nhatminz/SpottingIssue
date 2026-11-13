@@ -18,7 +18,7 @@ from ..io.jsonl_reader import JSONLReader, InputRecord
 from ..io.jsonl_writer import JSONLWriter, atomic_text
 from ..io.result_exporter import ResultExporter
 from ..io.fewshot import FewShotBank
-from ..schemas import FewShotValidation
+from ..schemas import FewShotValidation, FewShotReview
 from ..llm.client_factory import ClientFactory
 from ..llm.adapters import adapter_for
 from ..validators.output_validator import make_output
@@ -162,8 +162,11 @@ class PipelineRunner:
         effective_thinking = {}
         usage_rows = rows[:]
         global_validation = checkpoints.metadata("fewshot_validation")
-        if global_validation:
-            usage_rows.append({"audit":{"api_calls":{"generator":global_validation.get("api_calls",[])}}})
+        global_failure = checkpoints.metadata("fewshot_validation_failure") if not global_validation else None
+        global_calls = global_validation or global_failure
+        if global_calls:
+            usage_rows.append({"audit":{"api_calls":{"generator":global_calls.get("api_calls",[])},
+                                          "requests":{"generator":global_calls.get("requests",[])}}})
         for r in usage_rows:
             for role,calls in r["audit"].get("api_calls",{}).items():
                 for call in calls:
@@ -184,6 +187,7 @@ class PipelineRunner:
                             token_usage[k] = token_usage.get(k,0)+v
         summary = {**preflight, "completed": count,"accepted":count,"rejected":rejected_count,
             "fewshot_grounding":"PASS" if global_validation else "NOT_APPROVED", "global_error":self.global_error,
+            "global_status":"FAILED" if self.global_error else "OK",
             "failed": sum(r["status"]=="FAILED" for r in rows), "needs_review": sum(bool(r["audit"].get("needs_review")) for r in rows),
             "pending": sum(r["status"] in ["PENDING","RUNNING"] for r in rows), "output_records": exported,
             "run_complete": count+rejected_count == preflight["selected_records"], "total_issues": total_issues,
@@ -246,20 +250,33 @@ class PipelineRunner:
             saved = checkpoints.metadata("fewshot_validation")
             if saved:
                 self.fewshot.validate_report(FewShotValidation.model_validate_json(json.dumps(saved["report"])))
+                if saved.get("review"):
+                    restored = self.fewshot.resolve_review(FewShotReview.model_validate_json(json.dumps(saved["review"])))
+                    if restored.model_dump(mode="json") != saved["report"]:
+                        raise ValueError("Cached few-shot review and source evidence disagree")
             else:
                 validator = self._make_controller()
                 try:
                     report = await validator.generator.validate_fewshot()
                     saved = {"report":report.model_dump(mode="json"),
+                             "method":"source_span_ids_v1",
+                             "review":validator.generator.fewshot_review,
                              "api_calls":getattr(validator.generator.client,"calls",[])}
                     checkpoints.set_metadata("fewshot_validation", saved)
+                    checkpoints.set_metadata("fewshot_validation_failure", None)
                 except Exception as exc:
                     self.global_error = "Few-shot approval failed: "+type(exc).__name__+": "+str(exc)
                     for agent in [self.config.gen,self.config.judge]:
                         key = agent.api_key.get_secret_value()
                         if key and key != "EMPTY":
                             self.global_error = self.global_error.replace(key,"<redacted>")
-                    atomic_text(self.config.audit_dir/"fewshot_validation_failed.json",json.dumps({"error":self.global_error},ensure_ascii=False)+"\n")
+                    failure = {"error":self.global_error, "error_type":type(exc).__name__,
+                               "findings":getattr(exc,"findings",[]),
+                               "review":getattr(exc,"report",validator.generator.fewshot_review),
+                               "api_calls":getattr(validator.generator.client,"calls",[]),
+                               "requests":validator.generator.request_metrics}
+                    checkpoints.set_metadata("fewshot_validation_failure", failure)
+                    atomic_text(self.config.audit_dir/"fewshot_validation_failed.json",json.dumps(failure,ensure_ascii=False,indent=2)+"\n")
                     self._export_audit(checkpoints,preflight,manifest,self._materialize(checkpoints))
                     raise
                 finally:

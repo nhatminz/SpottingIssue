@@ -1,5 +1,7 @@
 # Báo cáo refactor FAC: full-judgment Generator, facts-only Judge
 
+> Đây là báo cáo kiểm chứng của lần refactor ban đầu. Fix startup few-shot tiếp theo (sửa một nhãn reference và dùng span IDs thay quote do model chép) ở [fewshot_startup_fix.md](fewshot_startup_fix.md); bản án/facts gốc vẫn giữ nguyên.
+
 Triển khai theo task ngày 2026-11-13. Đây là contract hiện hành; các báo cáo situation-only Generator/full-judgment Judge trước đây là lịch sử.
 
 ## Thay đổi chính và các file liên quan

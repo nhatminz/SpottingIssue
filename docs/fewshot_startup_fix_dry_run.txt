@@ -1,0 +1,166 @@
+{
+  "effective_config": {
+    "project_root": "/mnt/hdd/nhatminh/LegalDataset",
+    "input_path": "/mnt/hdd/nhatminh/LegalDataset/input/sample_input.jsonl",
+    "output_path": "/mnt/hdd/nhatminh/LegalDataset/output/judgment_with_issues.jsonl",
+    "rejected_path": "/mnt/hdd/nhatminh/LegalDataset/output/rejected_cases.jsonl",
+    "audit_dir": "/mnt/hdd/nhatminh/LegalDataset/output/audit",
+    "log_dir": "/mnt/hdd/nhatminh/LegalDataset/output/logs",
+    "checkpoint_dir": "/mnt/hdd/nhatminh/LegalDataset/output/checkpoints",
+    "prompt_dir": "/mnt/hdd/nhatminh/LegalDataset/prompts",
+    "fewshot_path": "/mnt/hdd/nhatminh/LegalDataset/input/fewshot.jsonl",
+    "resume": true,
+    "overwrite_output": false,
+    "cuda_visible_devices": "",
+    "max_workers": 40,
+    "max_concurrent_requests": 40,
+    "batch_size": 100,
+    "start_index": 0,
+    "limit": 0,
+    "random_seed": 42,
+    "gen": {
+      "api_base": "http://172.29.62.173:8000/v1",
+      "model": "DeepSeek-V4.1-Flash-1017",
+      "backend": "deepseek_vllm",
+      "thinking_enabled": true,
+      "thinking_effort": "high",
+      "generic_thinking_style": "qwen",
+      "supported_efforts": [
+        "low",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "fallback_effort": "high",
+      "structured_output_mode": "json_object",
+      "max_output_tokens": 131073,
+      "temperature": null,
+      "top_p": null,
+      "seed": null,
+      "timeout": null,
+      "max_retries": 3,
+      "extra_body": {},
+      "stop": []
+    },
+    "judge": {
+      "api_base": "http://172.29.62.173:8000/v1",
+      "model": "DeepSeek-V4.1-Flash-1017",
+      "backend": "deepseek_vllm",
+      "thinking_enabled": true,
+      "thinking_effort": "high",
+      "generic_thinking_style": "qwen",
+      "supported_efforts": [
+        "low",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "fallback_effort": "high",
+      "structured_output_mode": "json_object",
+      "max_output_tokens": 131073,
+      "temperature": null,
+      "top_p": null,
+      "seed": null,
+      "timeout": null,
+      "max_retries": 3,
+      "extra_body": {},
+      "stop": []
+    },
+    "max_debate_rounds": 6,
+    "enable_early_stop": true,
+    "enable_generator_rebuttal": true,
+    "enable_judge_reconsideration": true,
+    "enable_blind_judge_discovery": true,
+    "stop_on_stagnation": true,
+    "max_stagnant_rounds": 2,
+    "finalize_policy": "best_valid",
+    "unresolved_policy": "reject",
+    "strict_format": true,
+    "enable_evidence_validation": true,
+    "enable_deduplication": true,
+    "enable_coverage_check": true,
+    "max_json_repair_retries": 2,
+    "require_structured_output": true,
+    "max_context_tokens": 262144,
+    "max_input_tokens": 100000,
+    "truncation_policy": "error",
+    "tokenizer_path": null,
+    "token_count_method": "auto",
+    "api_request_timeout": 300.0,
+    "retry_backoff": 1.0,
+    "retry_jitter": 0.25,
+    "api_extra_body": {},
+    "thinking_unsupported_policy": "fail",
+    "log_level": "INFO",
+    "save_debate_history": true,
+    "save_raw_responses": false,
+    "save_token_usage": true,
+    "dry_run": true,
+    "fail_on_record_error": true
+  }
+}
+{
+  "total_input_records": 62,
+  "selected_records": 62,
+  "input_sha256": "a6bb9bd22f57e4f773a63d2a7ab98885b77b154f1caebc3940b25c717a20b0bf",
+  "fewshot_examples": 5,
+  "fewshot_overlaps": [
+    {
+      "input_index": 7,
+      "doc_name": "1362988",
+      "excluded_examples": [
+        "E5"
+      ]
+    },
+    {
+      "input_index": 10,
+      "doc_name": "1522295",
+      "excluded_examples": [
+        "E3"
+      ]
+    },
+    {
+      "input_index": 20,
+      "doc_name": "1178738",
+      "excluded_examples": [
+        "E4"
+      ]
+    },
+    {
+      "input_index": 30,
+      "doc_name": "1290086",
+      "excluded_examples": [
+        "E2"
+      ]
+    },
+    {
+      "input_index": 52,
+      "doc_name": "330709",
+      "excluded_examples": [
+        "E1"
+      ]
+    }
+  ],
+  "fewshot_grounding": "runtime Generator semantic check required before examples are used",
+  "dry_run": true,
+  "manifest": {
+    "input_sha256": "a6bb9bd22f57e4f773a63d2a7ab98885b77b154f1caebc3940b25c717a20b0bf",
+    "config_sha256": "2ff0613f083863398da0761a581e381505beb63b3287cd1ebc9157d38b2f69e2",
+    "prompt_sha256": {
+      "benchmark_scope.md": "b7f686609fe8cdabe44a83cd2da30b5f1130e78c27a4e4c25341e52ce522e536",
+      "generator_fewshot_validation.md": "63e61dee3135eb7fbf842e9e6f70f5032d09413a21f4db67149d6ec900816da3",
+      "generator_revision.md": "418c62d96e7b31fc75fc43a5cfd49b579d5353d377ac61033fd376d29f0fe5b2",
+      "generator_system.md": "75c1f8b37e08a961b4102f3a0af0f53fb944770cf75f3c5161de0994fcf7656c",
+      "judge_blind_discovery.md": "e9720ca8fd077c81bef36fc8847e1b6905aa9f5ed895f82b7c6d319d24f26937",
+      "judge_reconsideration.md": "3569c8ddf199e48cc0223116b4cf6cf2514a522a022b626c4d859fe0283b1eb0",
+      "judge_system.md": "6d112ee7e9607ee7aac6ba872fdf069e3293c36ab9670be75dcc28fb136dbfbc"
+    },
+    "code_sha256": "40700d2d0f49ffa90dbd00fddc467f15fba50367d1dda5bde0e01afcb83a4b37",
+    "export_policy": "fac_facts_only_v3",
+    "fewshot_sha256": "bf57c4334ea9c10e5d809b86c466bcb6d19b8d0a790dd0a3c89946b89f24f95a",
+    "output_path": "/mnt/hdd/nhatminh/LegalDataset/output/judgment_with_issues.jsonl",
+    "rejected_path": "/mnt/hdd/nhatminh/LegalDataset/output/rejected_cases.jsonl",
+    "audit_dir": "/mnt/hdd/nhatminh/LegalDataset/output/audit",
+    "log_dir": "/mnt/hdd/nhatminh/LegalDataset/output/logs"
+  }
+}

@@ -10,7 +10,7 @@ from legal_issue_pipeline.llm.openai_client import OpenAICompatibleClient
 from legal_issue_pipeline.llm.base_client import LLMError,ContextLimitError
 from legal_issue_pipeline.pipeline.runner import PipelineRunner
 from conftest import (FakeClient,FACTS,APPLICATION,gen_data,judge_data,critique,response,assessment,
-                     discovery_data,fewshot_report)
+                     discovery_data,fewshot_review)
 from test_fac_agents_and_debate import assert_judge_isolated
 
 
@@ -26,7 +26,7 @@ async def test_http_pipeline_full_sources_fewshot_only_generator_and_facts_only_
         assert body['max_tokens']==131073 and body['chat_template_kwargs']=={'thinking':True,'reasoning_effort':50}
         if request.headers['x-test-role']=='gen':
             roles.append('generator');gen_payloads.append(payload)
-            if 'examples_to_audit' in payload:answer=fewshot_report(payload['examples_to_audit'])
+            if 'examples_to_audit' in payload:answer=fewshot_review(payload['examples_to_audit'])
             else:
                 assert payload['benchmark_seed']==record['benchmark_seed'] and payload['markdown']==record['markdown']
                 assert len(payload['few_shot_examples'])==5

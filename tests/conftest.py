@@ -69,6 +69,12 @@ def fewshot_report(examples):
         for example in examples for index in range(len(example['issues']))]}
 
 
+def fewshot_review(examples):
+    return {'checks':[dict(example_id=example['example_id'],issue_index=index,issue_supported=True,explain_supported=True,
+        facts_span_ids=[example['facts_spans'][0]['span_id']],explanation='Các dữ kiện hỗ trợ cặp issue/explain này.')
+        for example in examples for index in range(len(example['issues']))]}
+
+
 class FakeClient:
     def __init__(self, values):
         self.values=list(values);self.messages=[];self.calls=[];self.closed=False
@@ -76,7 +82,7 @@ class FakeClient:
         self.messages.append(deepcopy(messages))
         payload=json.loads(messages[1]['content'])
         if 'examples_to_audit' in payload:
-            value=fewshot_report(payload['examples_to_audit'])
+            value=fewshot_review(payload['examples_to_audit'])
         else:
             value=self.values.pop(0)
         if isinstance(value,Exception):raise value

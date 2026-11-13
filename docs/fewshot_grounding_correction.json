@@ -1,0 +1,15 @@
+{
+  "original_sha256": "69efbeccc15f0e1c44bf591203a14cbb95626cf56feae8891285d2a46a2e490d",
+  "corrected_sha256": "bf57c4334ea9c10e5d809b86c466bcb6d19b8d0a790dd0a3c89946b89f24f95a",
+  "backup": "docs/history/fewshot_before_grounding_fix.jsonl",
+  "corrections": [
+    {
+      "doc_name": "1178738",
+      "issue_id": "1178738-I03",
+      "before": "Việc xác định quyền xử lý tài sản bảo đảm của Agribank đối với tàu cá KG 94472 TS khi hợp đồng thế chấp đã được công chứng và DNTN Trường Huy không trả được nợ",
+      "after": "Việc xác định quyền xử lý tài sản bảo đảm của Agribank đối với tàu cá KG 94472 TS khi DNTN Trường Huy còn nợ quá hạn và không có khả năng trả nợ",
+      "reason": "Removed notarization claim absent from facts_clean; retained overdue debt/inability to repay stated in facts_clean."
+    }
+  ],
+  "facts_and_other_fields_unchanged": true
+}

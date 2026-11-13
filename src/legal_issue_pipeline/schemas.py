@@ -188,3 +188,17 @@ class FewShotIssueCheck(Structured):
 
 class FewShotValidation(Structured):
     checks: list[FewShotIssueCheck]
+
+
+class FewShotReviewCheck(Structured):
+    """LLM returns source IDs; exact text is resolved by code, never recopied."""
+    example_id: str = Field(pattern=r"^E[1-5]$")
+    issue_index: int = Field(ge=0)
+    issue_supported: bool
+    explain_supported: bool
+    facts_span_ids: list[str]
+    explanation: str = Field(min_length=1, max_length=1500)
+
+
+class FewShotReview(Structured):
+    checks: list[FewShotReviewCheck]
