@@ -4,11 +4,8 @@ PROJECT_ROOT="${PROJECT_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && 
 export PROJECT_ROOT
 # Mọi artifact smoke tách khỏi production. SMOKE_ROOT mới cho cấu hình mới.
 export SMOKE_ROOT="${SMOKE_ROOT:-$PROJECT_ROOT/output/smoke}"
-export OUTPUT_PATH="${OUTPUT_PATH:-$SMOKE_ROOT/judgment_with_issues.jsonl}"
-export REJECTED_PATH="${REJECTED_PATH:-$SMOKE_ROOT/rejected_cases.jsonl}"
-export AUDIT_DIR="${AUDIT_DIR:-$SMOKE_ROOT/audit}"
-export LOG_DIR="${LOG_DIR:-$SMOKE_ROOT/logs}"
-export CHECKPOINT_DIR="${CHECKPOINT_DIR:-$SMOKE_ROOT/checkpoints}"
+# run_pipeline dựng output theo RUN_DIR; smoke phải có root riêng.
+export RUN_DIR="$SMOKE_ROOT"
 export GEN_API_BASE="${GEN_API_BASE:-http://127.0.0.1:8001/v1}"
 export JUDGE_API_BASE="${JUDGE_API_BASE:-$GEN_API_BASE}"
 export GEN_MODEL="${GEN_MODEL:-qwen3-4b}"
@@ -36,7 +33,7 @@ export MAX_CONTEXT_TOKENS="${MAX_CONTEXT_TOKENS:-32768}"
 export MAX_INPUT_TOKENS="${MAX_INPUT_TOKENS:-24000}"
 export TOKENIZER_PATH="${TOKENIZER_PATH:-/mnt/hdd/nhatminh/SpecDecode/models/Qwen3-4B}"
 export LIMIT="${LIMIT:-2}"
-# Local Qwen smoke remains small even though production now schedules up to 60 cases.
+# Local Qwen smoke remains small even though production schedules up to 40 cases.
 export MAX_WORKERS="${MAX_WORKERS:-1}"
 export MAX_CONCURRENT_REQUESTS="${MAX_CONCURRENT_REQUESTS:-1}"
 export BATCH_SIZE="${BATCH_SIZE:-8}"

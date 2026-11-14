@@ -4,7 +4,7 @@ Contract hiện tại: `fac_semantic_grounding_v4`. Không yêu cầu evidence q
 
 ## Input và output
 
-Mặc định input `$PROJECT_ROOT/input/sample_input.jsonl`. Bắt buộc mỗi dòng có `doc_name`, `markdown` là chuỗi không rỗng, cùng object `benchmark_seed` có bốn chuỗi không rỗng: `facts_clean`, `facts`, `application`, `conclusion`. Không dùng fallback sang situation hoặc tự tạo dữ liệu thiếu. Mọi metadata khác giữ nguyên. JSON duplicate keys/non-finite numbers bị từ chối. Nếu top-level đã có `issues` hoặc `explain`, pipeline báo xung đột và dừng trước inference, không ghi đè.
+Script production mặc định đọc `/workspace/storage-shared/nlp/hieplh8/research/VT-LegalBench/output/rule_extraction/haipl_filtered/clean.jsonl`, chọn tối đa 1000 bản án đầu. Đổi `INPUT_PATH` và `LIMIT` ngay trong `scripts/run_pipeline.sh`; file mẫu phát triển vẫn là `input/sample_input.jsonl`. Bắt buộc mỗi dòng có `doc_name`, `markdown` là chuỗi không rỗng, cùng object `benchmark_seed` có bốn chuỗi không rỗng: `facts_clean`, `facts`, `application`, `conclusion`. Không dùng fallback sang situation hoặc tự tạo dữ liệu thiếu. Mọi metadata khác giữ nguyên. JSON duplicate keys/non-finite numbers bị từ chối. Nếu top-level đã có `issues` hoặc `explain`, pipeline báo xung đột và dừng trước inference, không ghi đè.
 
 Output giữ toàn bộ record input, chỉ thêm:
 
@@ -41,7 +41,7 @@ Thông thường Generator nhận đủ 5 ví dụ ở mọi lượt. Nếu doc_
 
 ## Chạy trên B200
 
-Giữ nguyên project root `/workspace/storage-shared/nlp/minhpn19/LegalDataset`, endpoint `http://172.29.62.173:8000/v1`, model ID `DeepSeek-V4.1-Flash-1017`. Client chỉ gọi HTTP, không load weights/GPU local. Python >=3.10; dependencies runtime chỉ Pydantic và httpx.
+Giữ nguyên project root `/workspace/storage-shared/nlp/minhpn19/LegalDataset`, Generator `http://172.29.62.173:8000/v1`, Judge `http://172.29.62.175:8000/v1`, model ID `DeepSeek-V4.1-Flash-1017`. Client chỉ gọi HTTP, không load weights/GPU local. Python >=3.10; dependencies runtime chỉ Pydantic và httpx.
 
 ```bash
 cd /workspace/storage-shared/nlp/minhpn19/LegalDataset
@@ -51,50 +51,48 @@ cd /workspace/storage-shared/nlp/minhpn19/LegalDataset
 DRY_RUN=true bash scripts/run_pipeline.sh
 ```
 
-Sau khi đồng bộ src/prompts/scripts và hai file input/fewshot sang đúng root B200, dùng namespace mới vì contract đã đổi:
+Sau khi đồng bộ scripts sang B200, chỉnh tên run trực tiếp trong `scripts/run_pipeline.sh`:
+
+```bash
+export RUN_DIR="${RUN_DIR:-$PROJECT_ROOT/output/run_1k_dual_server}"
+```
+
+Năm đường dẫn luôn được dựng theo RUN_DIR, kể cả khi terminal còn export các đường dẫn cũ:
+
+```text
+RUN_DIR/
+  judgment_with_issues.jsonl
+  rejected_cases.jsonl
+  audit/
+  logs/
+  checkpoints/
+```
+
+Sau đó chỉ cần:
 
 ```bash
 cd /workspace/storage-shared/nlp/minhpn19/LegalDataset
-RUN_DIR="$PWD/output/semantic_grounding_v4"
-
-INPUT_PATH="$PWD/input/sample_input.jsonl" \
-FEWSHOT_PATH="$PWD/input/fewshot.jsonl" \
-GEN_BACKEND=deepseek_vllm \
-JUDGE_BACKEND=deepseek_vllm \
-GEN_THINKING_EFFORT=high \
-JUDGE_THINKING_EFFORT=high \
-MAX_WORKERS=40 \
-MAX_CONCURRENT_REQUESTS=40 \
-BATCH_SIZE=100 \
-MAX_DEBATE_ROUNDS=6 \
-START_INDEX=0 \
-LIMIT=0 \
-OUTPUT_PATH="$RUN_DIR/judgment_with_issues.jsonl" \
-REJECTED_PATH="$RUN_DIR/rejected_cases.jsonl" \
-AUDIT_DIR="$RUN_DIR/audit" \
-LOG_DIR="$RUN_DIR/logs" \
-CHECKPOINT_DIR="$RUN_DIR/checkpoints" \
 bash scripts/run_pipeline.sh
 ```
 
-Lặp đúng lệnh để resume. Không đổi START_INDEX theo số dòng output: output chỉ chứa bản án PASS. `LIMIT=0` chọn toàn bộ input; batch 100 cho phép 40 vụ chạy và các vụ đang chờ tiếp tục khi worker rảnh. GPU scheduling thực tế do server quyết định.
+Giữ cùng RUN_DIR/input/cấu hình semantic để resume. Không đổi START_INDEX theo số dòng output: output chỉ chứa bản án PASS. `LIMIT=1000` là default trong script; `LIMIT=0` chọn toàn bộ input. Batch 100 cho phép 40 vụ chạy và các vụ đang chờ tiếp tục khi worker rảnh. GPU scheduling thực tế do server quyết định. Để resume run đang nằm ở `output/1k`, đặt RUN_DIR thành `$PROJECT_ROOT/output/1k`.
 
 Để chạy thử 1–2 vụ, dùng LIMIT=2 và một RUN_DIR khác, không dùng checkpoint pilot cho full dataset. Nếu dùng environment đang active, đặt `PYTHON_BIN="$(command -v python)"`. Chạy local để phát triển bằng `PROJECT_ROOT="$PWD"`; script vẫn giữ default root B200.
 
 ## Cấu hình
 
-Toàn bộ biến runtime được đưa ra `scripts/run_pipeline.sh` và có thể override từ môi trường. Đã bỏ ENABLE_EVIDENCE_VALIDATION; semantic grounding luôn là điều kiện PASS của Judge, không phải một quote-validation toggle.
+Toàn bộ biến runtime được đưa ra `scripts/run_pipeline.sh`. RUN_DIR có thể được cấu hình trong file hoặc từ môi trường; cả 5 đường dẫn kết quả luôn lấy từ RUN_DIR, không đọc các biến *_PATH cũ trong terminal. Các biến còn lại giữ cơ chế environment override; nếu đã export INPUT_PATH/LIMIT/endpoint từ trước, giá trị đó vẫn có ưu tiên hơn default của chúng trong file. Đã bỏ ENABLE_EVIDENCE_VALIDATION; semantic grounding luôn là điều kiện PASS của Judge, không phải một quote-validation toggle.
 
 | Nhóm | Defaults chính |
 | --- | --- |
-| Input | `INPUT_PATH=$PROJECT_ROOT/input/sample_input.jsonl`, `FEWSHOT_PATH=$PROJECT_ROOT/input/fewshot.jsonl` |
-| Output | `output/judgment_with_issues.jsonl`, `output/rejected_cases.jsonl`, audit/log/checkpoint riêng |
-| Agent | hai backend `deepseek_vllm`, thinking bật, effort `high` → budget **50** |
-| Runtime | `MAX_WORKERS=40`, `MAX_CONCURRENT_REQUESTS=40`, `BATCH_SIZE=100`, `START_INDEX=0`, `LIMIT=0` |
+| Input | `INPUT_PATH=.../haipl_filtered/clean.jsonl`, `FEWSHOT_PATH=$PROJECT_ROOT/input/fewshot.jsonl` |
+| Output | `RUN_DIR=$PROJECT_ROOT/output/run_1k_dual_server`; cả 5 đường dẫn trong run này |
+| Agent | Generator `.173`, Judge `.175`; hai backend `deepseek_vllm`, thinking bật, effort `high` → budget **50** |
+| Runtime | `MAX_WORKERS=40`, `MAX_CONCURRENT_REQUESTS=40`, `BATCH_SIZE=100`, `START_INDEX=0`, `LIMIT=1000` |
 | Debate | `MAX_DEBATE_ROUNDS=6` (cho phép 1–6), early stop/stagnation bật |
 | Tokens | **131073 token sinh mới riêng cho mỗi request của mỗi vai trò**, input guard 100000, context guard 262144 |
 | Count | `TOKEN_COUNT_METHOD=auto`, `TOKENIZER_PATH` rỗng |
-| Failure | `API_REQUEST_TIMEOUT=300`, mỗi vai trò max_retries=3, `MAX_JSON_REPAIR_RETRIES=2`, `FAIL_ON_RECORD_ERROR=true` |
+| Failure | `API_REQUEST_TIMEOUT=300`, mỗi vai trò max_retries=3, `MAX_JSON_REPAIR_RETRIES=2`, `FAIL_ON_RECORD_ERROR=false` |
 | Resume/log | `RESUME=true`, `OVERWRITE_OUTPUT=false`, raw responses mặc định false |
 
 vLLM gửi `chat_template_kwargs={"thinking":true,"reasoning_effort":50}`. Có thể chọn low=25, high=50, xhigh=75, max=100 hoặc budget số 1–100. `extra_high` là alias cũ cho 100, có log; medium/minimal mặc định lỗi. Tắt bằng THINKING_ENABLED=false hoặc effort=none. Hosted API/generic Qwen vẫn có adapter riêng. Effort 50 không phải giới hạn 50 token. Tham khảo [recipe vLLM](https://recipes.vllm.ai/deepseek-ai/DeepSeek-V4.1-Flash).
@@ -115,7 +113,7 @@ Audit từng vụ giữ candidate/private semantic scope notes của Generator, 
 
 ```bash
 .venv/bin/python -m pytest -q
-PROJECT_ROOT="$PWD" DRY_RUN=true bash scripts/run_pipeline.sh
+PROJECT_ROOT="$PWD" INPUT_PATH="$PWD/input/sample_input.jsonl" DRY_RUN=true bash scripts/run_pipeline.sh
 ```
 
 Các test contract cũ trái với thiết kế mới được giữ tại `tests/legacy_situation_contract/*.txt`; chúng không còn là kiểm thử của API hiện tại. Tests mới kiểm tra full sources, facts-only allowlist qua blind/retry/rebuttal/final, paraphrase/unsupported-detail debate, private metadata isolation, 5 examples/overlap/screening, 6 revisions, output preservation, reject/failure, resume/fingerprints, 40 workers và 40 HTTP requests. Các API/retry/effort tests vẫn chạy. Báo cáo hiện tại ở [docs/semantic_grounding.md](docs/semantic_grounding.md); [docs/fac_refactor.md](docs/fac_refactor.md) mô tả contract v3 lịch sử. Các báo cáo Qwen/situation cũ là lịch sử, không phải kết quả kiểm chứng contract mới.

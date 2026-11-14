@@ -2,26 +2,33 @@
 set -euo pipefail
 
 # B200: client chỉ gọi HTTP tới DeepSeek đã serve, không load model/GPU local.
-# Chỉnh default tại đây hoặc override bằng environment variables.
+# Chỉnh cấu hình ngay trong file rồi chạy: bash scripts/run_pipeline.sh
+# RUN_DIR quyết định cả 5 đường dẫn output bên dưới; không cần export thủ công.
 # Nếu chạy checkout ở nơi khác, đặt PROJECT_ROOT=/duong/dan/LegalDataset.
 export PROJECT_ROOT="${PROJECT_ROOT:-/workspace/storage-shared/nlp/minhpn19/LegalDataset}"
 export PYTHON_BIN="${PYTHON_BIN:-$PROJECT_ROOT/.venv/bin/python}"
 
 # Endpoint và model ID đã được cung cấp cho DeepSeek V4.1 Flash 1017.
 # Đây là ID server expose qua /v1/models, không phải filesystem path tới weights.
-# Đổi hai biến này để chuyển cả hai agent; GEN_/JUDGE_ vẫn override độc lập được.
+# API base chung làm default cho Generator; Judge có endpoint riêng bên dưới.
+# Model ID chung; GEN_/JUDGE_ vẫn có thể cấu hình độc lập.
 export DEEPSEEK_API_BASE="${DEEPSEEK_API_BASE:-http://172.29.62.173:8000/v1}"
 export DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-DeepSeek-V4.1-Flash-1017}"
 
-# Input/output: không sửa input. LIMIT=0 là toàn bộ; START_INDEX bắt đầu từ 0.
-export INPUT_PATH="${INPUT_PATH:-$PROJECT_ROOT/input/sample_input.jsonl}"
+# ĐỔI TÊN RUN TẠI ĐÂY. Giữ cùng RUN_DIR để resume cùng input/config/prompts/code.
+# Đổi input, LIMIT hoặc tham số inference thì chọn RUN_DIR mới.
+export RUN_DIR="${RUN_DIR:-$PROJECT_ROOT/output/run_1k_dual_server}"
+
+# Input/output: không sửa input. LIMIT=1000 ở dưới chọn 1000 bản án đầu.
+export INPUT_PATH="${INPUT_PATH:-/workspace/storage-shared/nlp/hieplh8/research/VT-LegalBench/output/rule_extraction/haipl_filtered/clean.jsonl}"
 export FEWSHOT_PATH="${FEWSHOT_PATH:-$PROJECT_ROOT/input/fewshot.jsonl}"
-export OUTPUT_PATH="${OUTPUT_PATH:-$PROJECT_ROOT/output/judgment_with_issues.jsonl}"
-# File riêng cho vụ bị loại; mặc định nằm cạnh OUTPUT_PATH, không trộn vào labels.
-export REJECTED_PATH="${REJECTED_PATH:-$(dirname -- "$OUTPUT_PATH")/rejected_cases.jsonl}"
-export AUDIT_DIR="${AUDIT_DIR:-$PROJECT_ROOT/output/audit}"
-export LOG_DIR="${LOG_DIR:-$PROJECT_ROOT/output/logs}"
-export CHECKPOINT_DIR="${CHECKPOINT_DIR:-$PROJECT_ROOT/output/checkpoints}"
+# Luôn lấy theo RUN_DIR, kể cả khi shell còn export *_PATH từ run trước.
+# Muốn đổi tên file/thư mục con thì sửa trực tiếp các dòng này.
+export OUTPUT_PATH="$RUN_DIR/judgment_with_issues.jsonl"
+export REJECTED_PATH="$RUN_DIR/rejected_cases.jsonl"
+export AUDIT_DIR="$RUN_DIR/audit"
+export LOG_DIR="$RUN_DIR/logs"
+export CHECKPOINT_DIR="$RUN_DIR/checkpoints"
 export PROMPT_DIR="${PROMPT_DIR:-$PROJECT_ROOT/prompts}"
 export RESUME="${RESUME:-true}"
 export OVERWRITE_OUTPUT="${OVERWRITE_OUTPUT:-false}"
@@ -41,7 +48,7 @@ export BATCH_SIZE="${BATCH_SIZE:-100}"
 export START_INDEX="${START_INDEX:-0}"
 # Số bản ghi INPUT được chọn từ START_INDEX; 0=đến cuối file.
 # Đây không phải số vụ PASS cần thu được; REJECTED/FAILED vẫn thuộc phạm vi chọn.
-export LIMIT="${LIMIT:-0}"
+export LIMIT="${LIMIT:-1000}"
 export RANDOM_SEED="${RANDOM_SEED:-42}"
 
 # Generator: endpoint/API model ID riêng. Secret file chỉ dùng khi API_KEY rỗng.
@@ -75,7 +82,7 @@ export GEN_EXTRA_BODY="${GEN_EXTRA_BODY:-}"
 if [[ -z "$GEN_EXTRA_BODY" ]]; then export GEN_EXTRA_BODY='{}'; fi
 
 # Judge: có client/system prompt/context/inference riêng, dù dùng chung endpoint.
-export JUDGE_API_BASE="${JUDGE_API_BASE:-$DEEPSEEK_API_BASE}"
+export JUDGE_API_BASE="${JUDGE_API_BASE:-http://172.29.62.175:8000/v1}"
 export JUDGE_API_KEY="${JUDGE_API_KEY:-}"
 export JUDGE_API_KEY_FILE="${JUDGE_API_KEY_FILE:-}"
 export JUDGE_MODEL="${JUDGE_MODEL:-$DEEPSEEK_MODEL}"
@@ -152,7 +159,8 @@ export SAVE_DEBATE_HISTORY="${SAVE_DEBATE_HISTORY:-true}"
 export SAVE_RAW_RESPONSES="${SAVE_RAW_RESPONSES:-false}"
 export SAVE_TOKEN_USAGE="${SAVE_TOKEN_USAGE:-true}"
 export DRY_RUN="${DRY_RUN:-false}"
-export FAIL_ON_RECORD_ERROR="${FAIL_ON_RECORD_ERROR:-true}"
+# false: ghi FAILED riêng và tiếp tục các vụ khác; không đưa vụ lỗi vào main output.
+export FAIL_ON_RECORD_ERROR="${FAIL_ON_RECORD_ERROR:-false}"
 
 [[ -f "$INPUT_PATH" ]] || { echo "Không tìm thấy INPUT_PATH: $INPUT_PATH" >&2; exit 2; }
 [[ -f "$FEWSHOT_PATH" ]] || { echo "Không tìm thấy FEWSHOT_PATH: $FEWSHOT_PATH" >&2; exit 2; }
