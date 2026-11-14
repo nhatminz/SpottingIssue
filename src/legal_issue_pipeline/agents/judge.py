@@ -2,7 +2,6 @@
 from __future__ import annotations
 from ..schemas import (DiscoveryOutput, GeneratorOutput, JudgeOutput, JudgeCandidate, PublicIssue,
                        SafeResponse, SafeAssessment, SafeFeedback, SafeHistory)
-from ..validators.judge_validator import scope_rubric_passes
 from .base_agent import BaseAgent
 
 
@@ -27,7 +26,9 @@ class FeedbackFirewall:
             if ids is not None and set(f.issue_ids)-ids:
                 raise ValueError("Feedback refers to an unknown issue ID")
             feedback.append(SafeFeedback(feedback_id=f.feedback_id, issue_ids=f.issue_ids,
-                error_code=f.error_code, action=f.action, explanation=f.explanation))
+                error_code=f.error_code, action=f.action, failed_criterion=f.failed_criterion,
+                criterion_refs=f.criterion_refs, coverage_ids=f.coverage_ids, cross_issue_ids=f.cross_issue_ids,
+                problem=f.problem, reason=f.reason, requested_change=f.requested_change))
         for a in judgment.rebuttal_assessments:
             assessments.append(SafeAssessment(feedback_id=a.feedback_id, decision=a.decision,
                                                explanation=a.explanation))
@@ -84,55 +85,64 @@ class JudgeAgent(BaseAgent):
 
     def validate_judgment(self, output: JudgeOutput, facts_clean: str, current: JudgeCandidate,
                          previous: JudgeOutput | None, discovery: DiscoveryOutput | None = None):
-        ids = {i.issue_id for i in current.issues}
-        reviews = [r.issue_id for r in output.per_issue_reviews]
-        if set(reviews) != ids or len(reviews) != len(ids):
-            raise ValueError("Review every issue/explain pair exactly once")
-        feedback_ids = [f.feedback_id for f in output.generator_visible_feedback]
-        if len(feedback_ids) != len(set(feedback_ids)):
-            raise ValueError("Duplicate feedback ID")
-        core_ids = {r.issue_id for r in output.per_issue_reviews if r.classification == "CORE"}
-        for review in output.per_issue_reviews:
-            if set(review.related_issue_ids)-(ids-{review.issue_id}):
-                raise ValueError("Unknown related issue ID")
-            if review.verdict == "PASS" and (review.classification != "CORE" or review.error_codes
-                                             or not review.issue_supported or not review.explain_supported):
-                raise ValueError("Only error-free CORE pairs may PASS")
-            if review.verdict != "PASS":
-                if not review.error_codes or not any(review.issue_id in f.issue_ids for f in output.generator_visible_feedback):
-                    raise ValueError("Adverse pair review needs an error code and actionable feedback")
-            if review.classification == "DUPLICATE" and not set(review.related_issue_ids)&core_ids:
-                raise ValueError("Duplicate must reference a covering CORE issue")
-        coverage = {c.coverage_id: c for c in output.coverage_analysis}
-        if len(coverage) != len(output.coverage_analysis):
-            raise ValueError("Duplicate coverage ID")
-        for item in output.coverage_analysis:
-            if set(item.matched_issue_ids)-core_ids:
-                raise ValueError("Coverage may match only current CORE IDs")
-        gaps = {key for key, item in coverage.items() if not item.matched_issue_ids}
-        if gaps and (output.rubric.coverage == "PASS" or not any(
-                f.error_code.value == "MISSING_CORE_ISSUE" and f.action == "ADD" for f in output.generator_visible_feedback)):
-            raise ValueError("Missing facts-supported CORE questions need coverage FAIL and ADD feedback")
-        expected = {d.issue_id for d in discovery.issues} if discovery else set()
-        comparisons = [c.discovery_issue_id for c in output.blind_comparison]
-        if set(comparisons) != expected or len(comparisons) != len(expected):
-            raise ValueError("Compare every blind proposal exactly once")
-        for comparison in output.blind_comparison:
-            refs, matches = set(comparison.coverage_issue_ids), set(comparison.matched_issue_ids)
-            if refs-coverage.keys() or matches-core_ids:
-                raise ValueError("Unknown blind comparison reference")
-            if comparison.disposition == "MATCHED":
-                covered = set().union(*(set(coverage[key].matched_issue_ids) for key in refs))
-                if not refs or not matches or not matches <= covered:
-                    raise ValueError("MATCHED requires current coverage matches")
-            if comparison.disposition == "MISSING" and (not refs or not refs <= gaps or matches):
-                raise ValueError("MISSING requires an unmatched coverage item")
+        validate_structure(output, current, discovery)
         FeedbackFirewall.project(output, facts_clean, current)
-        expected_responses = {r.feedback_id for r in current.responses_to_feedback}
-        actual_responses = [a.feedback_id for a in output.rebuttal_assessments]
-        if set(actual_responses) != expected_responses or len(actual_responses) != len(expected_responses):
-            raise ValueError("Reconsider every Generator response exactly once")
-        if output.overall_verdict == "PASS" and not scope_rubric_passes(output):
-            raise ValueError("PASS requires all eight facts-only rubric criteria and no unresolved findings")
-        if output.overall_verdict != "PASS" and not output.generator_visible_feedback and not output.unresolved_disputes:
-            raise ValueError("Non-PASS requires actionable feedback or an explicit unresolved dispute")
+        # Semantic FAIL, UNCERTAIN and contradictory PASS stay in debate/audit.
+        # Never request JSON repair to change these legal assessments.
+
+
+def validate_structure(output: JudgeOutput, current: JudgeCandidate | None = None,
+                       discovery: DiscoveryOutput | None = None):
+    """Only shape/identifier integrity errors belong in structured JSON repair."""
+    reviews = [r.issue_id for r in output.per_issue_reviews]
+    ids = set(reviews)
+    if len(ids) != len(reviews) or (current is not None and ids != {i.issue_id for i in current.issues}):
+        raise ValueError("Review every issue/explain pair exactly once")
+    feedback_ids = [f.feedback_id for f in output.generator_visible_feedback]
+    if len(feedback_ids) != len(set(feedback_ids)):
+        raise ValueError("Duplicate feedback ID")
+    for review in output.per_issue_reviews:
+        if set(review.related_issue_ids)-(ids-{review.issue_id}):
+            raise ValueError("Unknown related issue ID")
+    core_ids = {r.issue_id for r in output.per_issue_reviews if r.classification == 'CORE'}
+    coverage = {c.coverage_id: c for c in output.coverage_analysis}
+    if len(coverage) != len(output.coverage_analysis):
+        raise ValueError("Duplicate coverage ID")
+    for item in coverage.values():
+        if set(item.matched_issue_ids)-core_ids or len(item.matched_issue_ids) != len(set(item.matched_issue_ids)):
+            raise ValueError("Coverage may match only distinct current CORE IDs")
+    findings = {f.finding_id:f for f in output.cross_issue_evaluation.findings}
+    if len(findings) != len(output.cross_issue_evaluation.findings):
+        raise ValueError("Duplicate cross-issue finding ID")
+    for finding in findings.values():
+        if set(finding.issue_ids)-ids or len(set(finding.issue_ids)) != len(finding.issue_ids):
+            raise ValueError("Cross-issue finding has invalid issue references")
+    for feedback in output.generator_visible_feedback:
+        if set(feedback.issue_ids)-ids or set(feedback.coverage_ids)-coverage.keys() or set(feedback.cross_issue_ids)-findings.keys():
+            raise ValueError("Feedback has unknown issue, coverage or finding reference")
+        if len(feedback.issue_ids) != len(set(feedback.issue_ids)):
+            raise ValueError("Feedback has duplicate issue references")
+        if any(ref.issue_id not in feedback.issue_ids for ref in feedback.criterion_refs):
+            raise ValueError("Grouped criterion reference must belong to feedback issue_ids")
+    comparisons = [c.discovery_issue_id for c in output.blind_comparison]
+    if len(comparisons) != len(set(comparisons)):
+        raise ValueError("Duplicate blind comparison")
+    if discovery is not None and set(comparisons) != {d.issue_id for d in discovery.issues}:
+        raise ValueError("Compare every blind proposal exactly once")
+    if current is not None and discovery is None and comparisons:
+        raise ValueError("Blind comparisons require discovery input")
+    for comparison in output.blind_comparison:
+        refs, matches = set(comparison.coverage_issue_ids), set(comparison.matched_issue_ids)
+        if refs-coverage.keys() or matches-core_ids:
+            raise ValueError("Unknown blind comparison reference")
+        if comparison.disposition == "MATCHED":
+            covered = set().union(*(set(coverage[key].matched_issue_ids) for key in refs))
+            if not refs or not matches or not matches <= covered:
+                raise ValueError("MATCHED requires current coverage matches")
+        if comparison.disposition == "MISSING" and (not refs or matches or any(coverage[key].matched_issue_ids for key in refs)):
+            raise ValueError("MISSING requires an unmatched coverage item")
+    assessments = [a.feedback_id for a in output.rebuttal_assessments]
+    if len(assessments) != len(set(assessments)):
+        raise ValueError("Duplicate rebuttal assessment")
+    if current is not None and set(assessments) != {r.feedback_id for r in current.responses_to_feedback}:
+        raise ValueError("Reconsider every Generator response exactly once")

@@ -61,7 +61,7 @@ def review(current, *, unsupported=False, assessment_decision=None):
     )
     if unsupported:
         value['generator_visible_feedback'][0].update(
-            action='REVISE', explanation='Issue I1: chi tiết A dùng vũ lực, đe dọa B không có căn cứ vì facts chỉ nêu việc lấy điện thoại. Loại bỏ chi tiết này và giải thích từ hành vi lấy tài sản đã được mô tả.'
+            action='REVISE', problem='Issue I1: chi tiết A dùng vũ lực, đe dọa B không có căn cứ vì facts chỉ nêu việc lấy điện thoại. Loại bỏ chi tiết này và giải thích từ hành vi lấy tài sản đã được mô tả.'
         )
     if assessment_decision:
         value['rebuttal_assessments'] = [assessment(assessment_decision)]
@@ -112,7 +112,7 @@ async def test_B_unsupported_violence_is_judged_then_corrected_through_debate(co
     assert first['per_issue_reviews'][0]['issue_supported'] is True
     assert first['per_issue_reviews'][0]['explain_supported'] is False
     feedback = first['generator_visible_feedback'][0]
-    assert feedback['error_code'] == 'UNSUPPORTED_FACT' and 'vũ lực' in feedback['explanation']
+    assert feedback['error_code'] == 'UNSUPPORTED_FACT' and 'vũ lực' in feedback['problem']
     assert 'vũ lực' not in result.explain[0]
     assert len(c.generator.client.messages) == 2  # revision, not structural JSON repair
     assert_judge_isolated(c.judge.client.messages, record)
@@ -142,7 +142,7 @@ async def test_D_valid_legal_paraphrase_can_contest_and_judge_withdraws(config, 
     record = judgment_record(record)
     first, rebuttal = candidate(), candidate(decision=decision)
     wrong = review(first, unsupported=True)
-    wrong['generator_visible_feedback'][0]['explanation'] = 'Thuật ngữ chiếm đoạt không có trong câu nguồn; yêu cầu làm rõ suy luận.'
+    wrong['generator_visible_feedback'][0]['problem'] = 'Thuật ngữ chiếm đoạt không có trong câu nguồn; yêu cầu làm rõ suy luận.'
     c = controller(config, [first, rebuttal], [wrong, review(rebuttal, assessment_decision='WITHDRAW')])
     result = await c.run(record)
     assert result.status.value == 'COMPLETED'
@@ -150,7 +150,7 @@ async def test_D_valid_legal_paraphrase_can_contest_and_judge_withdraws(config, 
     public_argument = sent['current_candidate']['responses_to_feedback'][0]['facts_argument']
     assert public_argument == rebuttal['responses_to_feedback'][0]['facts_argument'] and public_argument not in FACTS
     received = json.loads(c.generator.client.messages[-1][1]['content'])
-    assert received['feedback'][0]['explanation'] == wrong['generator_visible_feedback'][0]['explanation']
+    assert received['feedback'][0]['problem'] == wrong['generator_visible_feedback'][0]['problem']
     assert result.audit['judge_changes'] == 1
     assert_judge_isolated(c.judge.client.messages, record)
 
@@ -185,15 +185,14 @@ async def test_schema_failure_still_uses_three_attempts_then_fails(config, recor
     assert len(agent.client.messages) == 3
 
 
-async def test_private_scope_can_be_reconsidered_without_judge_disclosure(config, record):
+async def test_private_non_adjudication_is_descriptive_without_judge_disclosure(config, record):
     config.max_debate_rounds = 1
     first = gen_data()
     first['private_judicial_support'][0]['judicial_relevance_confirmed'] = False
     c = controller(config, [first, gen_data()], [judge_data(), judge_data()])
     result = await c.run(record)
-    assert result.status.value == 'COMPLETED' and result.audit['rounds'] == 1
-    revision = json.loads(c.generator.client.messages[-1][1]['content'])
-    assert revision['private_scope_findings'][0]['judicial_relevance_confirmed'] is False
+    assert result.status.value == 'COMPLETED' and result.audit['rounds'] == 0
+    assert result.audit['final_generator']['private_judicial_support'][0]['judicial_relevance_confirmed'] is False
     assert_judge_isolated(c.judge.client.messages, record)
 
 
@@ -216,7 +215,7 @@ async def test_G_old_contract_checkpoint_is_refused_without_changing_old_files(c
     path = config.checkpoint_dir / 'state.sqlite3'
     db = sqlite3.connect(path)
     manifest = json.loads(db.execute("SELECT value FROM metadata WHERE key='manifest'").fetchone()[0])
-    manifest['export_policy'] = 'fac_facts_only_v3'
+    manifest['export_policy'] = 'fac_semantic_grounding_v4'
     db.execute("UPDATE metadata SET value=? WHERE key='manifest'", (json.dumps(manifest),))
     db.commit(); db.close()
     files = [path, config.checkpoint_dir/'manifest.json', config.output_path, config.rejected_path]

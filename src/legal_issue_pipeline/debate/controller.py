@@ -6,7 +6,7 @@ from ..config import PipelineConfig
 from ..llm.base_client import LLMError
 from ..schemas import SafeHistory, CONTRACT_VERSION
 from ..validators.format_validator import candidate_errors
-from ..validators.judge_validator import scope_rubric_passes, RUBRIC_CRITERIA
+from ..validators.judge_validator import scope_rubric_passes, RUBRIC_CRITERIA, consistency_errors
 from .state import CaseStatus, DebateResult, EvaluatedCandidate
 from .stopping import StagnationDetector
 
@@ -21,9 +21,7 @@ class DebateController:
         return (not candidate.errors and self.config.enable_coverage_check
                 and self.config.strict_format
                 and self.config.enable_deduplication and self.config.enable_judge_reconsideration
-                and self.config.enable_generator_rebuttal
-                and all(s.judicial_relevance_confirmed and s.conclusion_consistent
-                        for s in candidate.output.private_judicial_support))
+                and self.config.enable_generator_rebuttal)
 
     def _approved(self, candidate: EvaluatedCandidate) -> bool:
         return self._required_validations_passed(candidate) and scope_rubric_passes(candidate.judgment)
@@ -59,10 +57,13 @@ class DebateController:
             candidates.append(candidate)
             self.trace.append({"evaluation_index": evaluation_index, "completed_debate_rounds": revisions,
                 "generator": current.model_dump(mode="json"), "judge": judgment.model_dump(mode="json"),
-                "mechanical_errors": errors})
+                "mechanical_errors": errors, "judge_consistency_errors": consistency_errors(judgment)})
             stagnant = detector.observe(current, judgment)
             if self._approved(candidate) and self.config.enable_early_stop:
                 reason, early_stop = "PASS", revisions < self.config.max_debate_rounds
+                break
+            if consistency_errors(judgment) and not judgment.generator_visible_feedback:
+                reason = "JUDGE_INCONSISTENT"
                 break
             if judgment.overall_verdict == "NEEDS_REVIEW" and not judgment.generator_visible_feedback:
                 reason = "FACTS_UNCERTAIN"
@@ -93,18 +94,18 @@ class DebateController:
                                   if getattr(final.judgment.rubric,key) != "PASS"]
             if not self._required_validations_passed(final):
                 rejection_reasons.append("A required validation was disabled or failed")
-            rejection_reasons += [f"Generator scope unresolved for {s.issue_id}: {s.explanation}"
-                                  for s in final.output.private_judicial_support
-                                  if not s.judicial_relevance_confirmed or not s.conclusion_consistent]
+            rejection_reasons += consistency_errors(final.judgment)
             rejection_reasons += final.judgment.unresolved_disputes
             rejection_reasons += [r.explanation for r in final.judgment.per_issue_reviews if r.verdict != "PASS"]
-            rejection_reasons += [f.explanation for f in final.judgment.generator_visible_feedback]
+            rejection_reasons += [f"{f.failed_criterion}: {f.problem} — {f.reason}; {f.requested_change}" for f in final.judgment.generator_visible_feedback]
             rejection_reasons = list(dict.fromkeys(rejection_reasons))
         audit = {"contract": CONTRACT_VERSION, "status": "COMPLETED" if approved else "REJECTED",
             "consensus": "PASS" if approved else "UNRESOLVED", "stop_reason": reason, "rounds": revisions,
             "judge_evaluations": len(candidates), "required_validations_passed": self._required_validations_passed(final),
             "needs_review": not approved, "final_issues": issues, "final_explain": explains,
             "final_generator": final.output.model_dump(mode="json"), "final_judge": final.judgment.model_dump(mode="json"),
+            "judge_consistency_errors": consistency_errors(final.judgment),
+            "cross_issue_evaluation": final.judgment.cross_issue_evaluation.model_dump(mode="json"),
             "rejection_reasons": rejection_reasons, "feedback_history": self.trace if not approved else [],
             "selected_evaluation": candidates.index(selected), "selection_policy": self.config.finalize_policy,
             "selection_is_heuristic": not approved, "early_stop": early_stop, "stagnation_signals": detector.signals,

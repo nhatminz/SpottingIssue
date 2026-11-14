@@ -16,7 +16,7 @@ class CheckpointManager:
             raise ValueError("Checkpoint already exists; use RESUME=true or a new checkpoint directory")
         if path.exists():
             # Check compatibility read-only BEFORE SQLite pragmas/schema writes.
-            # A v3 run must remain untouched when v4 declines to resume it.
+            # An older run must remain untouched when a new contract declines resume.
             previous = sqlite3.connect(path.resolve().as_uri()+"?mode=ro", uri=True)
             try:
                 existing = previous.execute("SELECT value FROM metadata WHERE key='manifest'").fetchone()

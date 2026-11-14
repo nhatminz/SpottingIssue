@@ -1,4 +1,4 @@
-> Historical initial task specification. Current roles and quote-free semantic requirements are documented in [docs/semantic_grounding.md](docs/semantic_grounding.md) and the active seven files under `prompts/`. This older specification does not override the current contract.
+> Historical initial task specification. Current roles and quote-free semantic requirements are documented in [docs/hierarchical_judge.md](docs/hierarchical_judge.md) and the active seven files under `prompts/`. This older specification does not override the current contract.
 
 # YÊU CẦU CODEX: XÂY DỰNG PIPELINE TẠO GOLD LEGAL ISSUES BẰNG MULTI-AGENT DEBATE
 

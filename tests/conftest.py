@@ -27,25 +27,48 @@ def gen_data():
         judicial_relevance_confirmed=True,conclusion_consistent=True,explanation='Yêu cầu ly hôn được xem xét và giải quyết độc lập. PRIVATE_GENERATOR_AUDIT_991')])
 
 
+def criterion(status='PASS', reason='Dữ kiện và câu hỏi pháp lý phù hợp.'):
+    return dict(status=status, reason=reason)
+
+
+def criterion_groups():
+    return dict(
+        factual_grounding={k:{**criterion(), 'basis':'FACT'} for k in
+            ('actor_grounding','conduct_grounding','object_grounding','decisive_fact_grounding','semantic_inference')},
+        subject_liability={k:criterion() for k in ('subject_precision','conduct_attribution','liability_precision','subject_grouping')},
+        atomicity={k:criterion() for k in ('atomicity','independence','overlap','granularity')},
+        explanation_review={k:criterion() for k in ('factual_basis','legal_connection','issue_alignment')})
+
+
+def coverage_tests():
+    return {k:criterion() for k in ('facts_grounding','legal_relevance','independence','existing_coverage')}
+
+
 def judge_data(verdict='PASS', blind=False):
-    return dict(per_issue_reviews=[dict(issue_id='I1',issue_supported=True,explain_supported=True,classification='CORE',related_issue_ids=[],verdict='PASS',error_codes=[],
+    return dict(per_issue_reviews=[dict(issue_id='I1',issue_supported=True,explain_supported=True,
+        **criterion_groups(), classification='CORE',related_issue_ids=[],verdict='PASS',error_codes=[],
         explanation='Cặp issue/explain có đủ căn cứ từ facts_clean.')],
         rubric={**{key:'PASS' for key in RUBRIC_CRITERIA},'explanation':'Đã kiểm tra từng cặp và độ bao phủ từ facts.'},
-        coverage_analysis=[dict(coverage_id='C1',issue_text=issue_data()['issue_text'],explanation='Yêu cầu chấm dứt hôn nhân và tình trạng mất tích làm phát sinh vấn đề quyền ly hôn.',matched_issue_ids=['I1'])],
+        coverage_analysis=[dict(coverage_id='C1',issue_text=issue_data()['issue_text'],explanation='Yêu cầu chấm dứt hôn nhân và tình trạng mất tích làm phát sinh vấn đề quyền ly hôn.',matched_issue_ids=['I1'],tests=coverage_tests())],
         blind_comparison=[dict(discovery_issue_id='D1',disposition='MATCHED',coverage_issue_ids=['C1'],matched_issue_ids=['I1'],
             explanation='Đề xuất được facts hỗ trợ và candidate bao phủ.')] if blind else [],
+        cross_issue_evaluation={**{k:criterion() for k in ('coverage','deduplication','fragmentation','over_merging')},'findings':[]},
         error_codes=[],feedback='Đã kiểm tra facts-only.',generator_visible_feedback=[],rebuttal_assessments=[],
         overall_verdict=verdict,unresolved_disputes=[])
 
 
 def critique(code='INVALID_EXPLANATION'):
     value=judge_data('REVISE')
-    value['per_issue_reviews'][0].update(verdict='REVISE',error_codes=[code])
-    value['rubric']['explanation_quality']='FAIL';value['error_codes']=[code]
+    value['per_issue_reviews'][0].update(verdict='REVISE',error_codes=[code], explain_supported=False)
+    path = 'factual_basis' if code == 'UNSUPPORTED_FACT' else 'legal_connection'
+    value['per_issue_reviews'][0]['explanation_review'][path] = criterion('FAIL', 'Giải thích chưa hỗ trợ câu hỏi được nêu.')
+    value['rubric']['explanation_quality']='FAIL';value['rubric']['consistency']='FAIL';value['error_codes']=[code]
     value['generator_visible_feedback']=[dict(feedback_id='F1',issue_ids=['I1'],error_code=code,action='RECONSIDER',
-        explanation='Giải thích cần làm rõ tình tiết quyết định và yêu cầu ly hôn.')]
+        failed_criterion='explanation_review.'+path,
+        problem='Giải thích chưa hỗ trợ câu hỏi pháp lý.',
+        reason='Cần làm rõ quan hệ giữa tình tiết quyết định và yêu cầu ly hôn.',
+        requested_change='Giải thích cụ thể vì sao facts làm phát sinh vấn đề này.')]
     if code == 'UNSUPPORTED_FACT':
-        value['per_issue_reviews'][0]['explain_supported']=False
         value['rubric']['grounding']='FAIL'
     return value
 

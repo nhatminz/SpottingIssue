@@ -5,7 +5,7 @@ from legal_issue_pipeline.agents.generator import GeneratorAgent
 from legal_issue_pipeline.agents.judge import JudgeAgent, public_candidate
 from legal_issue_pipeline.debate.controller import DebateController
 from legal_issue_pipeline.schemas import JudgeOutput, SafeHistory
-from conftest import (FACTS,APPLICATION,CONCLUSION,FakeClient,gen_data,judge_data,critique,
+from conftest import (coverage_tests,FACTS,APPLICATION,CONCLUSION,FakeClient,gen_data,judge_data,critique,
                       response,assessment,discovery_data)
 
 
@@ -73,7 +73,7 @@ async def test_unsupported_public_claim_is_a_semantic_judge_finding(config,recor
     revised=deepcopy(value);revised['responses_to_feedback']=response()['responses_to_feedback']
     adverse=critique('UNSUPPORTED_FACT')
     adverse['per_issue_reviews'][0][where+'_supported']=False
-    adverse['generator_visible_feedback'][0]['explanation']='Không có tình tiết đe dọa bằng vũ lực trong facts_clean; loại bỏ chi tiết này khỏi cặp issue/explain.'
+    adverse['generator_visible_feedback'][0]['problem']='Không có tình tiết đe dọa bằng vũ lực trong facts_clean; loại bỏ chi tiết này khỏi cặp issue/explain.'
     final=deepcopy(adverse);final['rebuttal_assessments']=[assessment('UPHOLD')]
     c=controller(config,[value,revised],[adverse,final])
     result=await c.run(record)
@@ -82,12 +82,12 @@ async def test_unsupported_public_claim_is_a_semantic_judge_finding(config,recor
     assert_judge_isolated(c.judge.client.messages,record)
 
 
-async def test_unresolved_generator_scope_is_rejected_not_a_technical_failure(config,record):
+async def test_unadjudicated_question_is_not_vetoed_by_private_scope(config,record):
     config.max_debate_rounds=1
     value=gen_data();value['private_judicial_support'][0]['conclusion_consistent']=False
     result=await controller(config,[value,deepcopy(value)],[judge_data(),judge_data()]).run(record)
-    assert result.status.value=='REJECTED'
-    assert any('Generator scope unresolved' in x for x in result.audit['rejection_reasons'])
+    assert result.status.value=='COMPLETED' and result.audit['rounds']==0
+    assert not result.audit['final_generator']['private_judicial_support'][0]['conclusion_consistent']
 
 
 async def test_valid_issue_with_unsupported_explain_is_rejected_by_judge(config,record):
@@ -172,6 +172,8 @@ async def test_private_metadata_cannot_be_added_to_filtered_history(config,gener
 
 async def test_missing_core_inventory_cannot_pass(config,generator_output):
     value=judge_data();value['coverage_analysis'].append(dict(coverage_id='C2',issue_text='Việc xác định quyền trực tiếp nuôi con của anh A khi anh A yêu cầu nuôi con',
-        explanation='Một câu hỏi trung tâm chưa được candidate đề cập.',matched_issue_ids=[]))
-    with pytest.raises(ValueError,match='Missing facts-supported CORE'):
-        JudgeAgent(FakeClient([]),config).validate_judgment(JudgeOutput.model_validate_json(json.dumps(value)),FACTS,public_candidate(generator_output,FACTS),None)
+        explanation='Một câu hỏi trung tâm chưa được candidate đề cập.',matched_issue_ids=[],tests=coverage_tests()))
+    from legal_issue_pipeline.validators.judge_validator import scope_rubric_passes, consistency_errors
+    parsed=JudgeOutput.model_validate_json(json.dumps(value))
+    JudgeAgent(FakeClient([]),config).validate_judgment(parsed,FACTS,public_candidate(generator_output,FACTS),None)
+    assert not scope_rubric_passes(parsed) and consistency_errors(parsed)

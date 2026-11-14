@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 IssueId = Annotated[str, Field(pattern=r"^I[1-9][0-9]{0,5}$")]
-CONTRACT_VERSION = "fac_semantic_grounding_v4"
+CONTRACT_VERSION = "fac_hierarchical_judge_v5"
 
 
 class Structured(BaseModel):
@@ -27,6 +27,10 @@ class ErrorCode(str, Enum):
     OUT_OF_SCOPE = "OUT_OF_SCOPE"
     INVALID_EXPLANATION = "INVALID_EXPLANATION"
     INCONSISTENT_EXPLANATION = "INCONSISTENT_EXPLANATION"
+    WRONG_SUBJECT = "WRONG_SUBJECT"
+    FRAGMENTATION = "FRAGMENTATION"
+    OVER_MERGING = "OVER_MERGING"
+    AMBIGUOUS_FACT = "AMBIGUOUS_FACT"
 
 
 class Issue(Structured):
@@ -76,20 +80,50 @@ class JudgeCandidate(Structured):
     responses_to_feedback: list[SafeResponse]
 
 
+CriterionStatus = Literal["PASS", "FAIL", "UNCERTAIN"]
+IssueCriterion = Literal[
+    "factual_grounding.actor_grounding", "factual_grounding.conduct_grounding",
+    "factual_grounding.object_grounding", "factual_grounding.decisive_fact_grounding",
+    "factual_grounding.semantic_inference", "subject_liability.subject_precision",
+    "subject_liability.conduct_attribution", "subject_liability.liability_precision",
+    "subject_liability.subject_grouping", "atomicity.atomicity", "atomicity.independence",
+    "atomicity.overlap", "atomicity.granularity", "explanation_review.factual_basis",
+    "explanation_review.legal_connection", "explanation_review.issue_alignment",
+]
+FeedbackCriterion = Literal[
+    "factual_grounding.actor_grounding", "factual_grounding.conduct_grounding",
+    "factual_grounding.object_grounding", "factual_grounding.decisive_fact_grounding",
+    "factual_grounding.semantic_inference", "subject_liability.subject_precision",
+    "subject_liability.conduct_attribution", "subject_liability.liability_precision",
+    "subject_liability.subject_grouping", "atomicity.atomicity", "atomicity.independence",
+    "atomicity.overlap", "atomicity.granularity", "explanation_review.factual_basis",
+    "explanation_review.legal_connection", "explanation_review.issue_alignment",
+    "COVERAGE", "DEDUPLICATION", "FRAGMENTATION", "OVER_MERGING", "FORMAT", "LEGAL_RELEVANCE",
+]
+
+
+class CriterionReference(Structured):
+    issue_id: IssueId
+    criterion: IssueCriterion
+
+
 class Feedback(Structured):
     feedback_id: str = Field(pattern=r"^F[1-9][0-9]{0,5}$")
     issue_ids: list[IssueId]
     error_code: ErrorCode
     action: Literal["REVISE", "REMOVE", "ADD", "SPLIT", "RECONSIDER"]
-    explanation: str = Field(min_length=1, max_length=1500)
+    failed_criterion: FeedbackCriterion
+    # Grouped feedback must explicitly identify every adverse criterion it handles.
+    criterion_refs: list[CriterionReference] = Field(default_factory=list)
+    coverage_ids: list[Annotated[str, Field(pattern=r"^C[1-9][0-9]{0,5}$")]] = Field(default_factory=list)
+    cross_issue_ids: list[Annotated[str, Field(pattern=r"^X[1-9][0-9]{0,5}$")]] = Field(default_factory=list)
+    problem: str = Field(min_length=1, max_length=1500)
+    reason: str = Field(min_length=1, max_length=1500)
+    requested_change: str = Field(min_length=1, max_length=1500)
 
 
-class SafeFeedback(Structured):
-    feedback_id: str = Field(pattern=r"^F[1-9][0-9]{0,5}$")
-    issue_ids: list[IssueId]
-    error_code: ErrorCode
-    action: Literal["REVISE", "REMOVE", "ADD", "SPLIT", "RECONSIDER"]
-    explanation: str = Field(min_length=1, max_length=1500)
+class SafeFeedback(Feedback):
+    """Same facts-only contract; no private fields or untyped extension channel."""
 
 
 class RebuttalAssessment(Structured):
@@ -110,10 +144,51 @@ class SafeHistory(Structured):
     assessments: list[SafeAssessment]
 
 
+class CriterionReview(Structured):
+    status: CriterionStatus
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class GroundingCriterionReview(CriterionReview):
+    basis: Literal["FACT", "SUPPORTED_INFERENCE", "UNSUPPORTED", "UNCERTAIN"]
+
+
+class FactualGroundingReview(Structured):
+    actor_grounding: GroundingCriterionReview
+    conduct_grounding: GroundingCriterionReview
+    object_grounding: GroundingCriterionReview
+    decisive_fact_grounding: GroundingCriterionReview
+    semantic_inference: GroundingCriterionReview
+
+
+class SubjectLiabilityReview(Structured):
+    subject_precision: CriterionReview
+    conduct_attribution: CriterionReview
+    liability_precision: CriterionReview
+    subject_grouping: CriterionReview
+
+
+class AtomicityReview(Structured):
+    atomicity: CriterionReview
+    independence: CriterionReview
+    overlap: CriterionReview
+    granularity: CriterionReview
+
+
+class ExplanationReview(Structured):
+    factual_basis: CriterionReview
+    legal_connection: CriterionReview
+    issue_alignment: CriterionReview
+
+
 class IssueReview(Structured):
     issue_id: IssueId
     issue_supported: bool
     explain_supported: bool
+    factual_grounding: FactualGroundingReview
+    subject_liability: SubjectLiabilityReview
+    atomicity: AtomicityReview
+    explanation_review: ExplanationReview
     classification: Literal["CORE", "SUPPORTING_FACT", "IRRELEVANT", "DUPLICATE"]
     related_issue_ids: list[IssueId]
     verdict: Literal["PASS", "REVISE", "REMOVE", "NEEDS_REVIEW"]
@@ -133,11 +208,35 @@ class EvaluationRubric(Structured):
     explanation: str = Field(min_length=1, max_length=1500)
 
 
+class CoverageTests(Structured):
+    facts_grounding: CriterionReview
+    legal_relevance: CriterionReview
+    independence: CriterionReview
+    # PASS: semantic comparison establishes the stated matches, or confirms no match.
+    existing_coverage: CriterionReview
+
+
 class CoverageItem(Structured):
     coverage_id: str = Field(pattern=r"^C[1-9][0-9]{0,5}$")
     issue_text: str = Field(min_length=10)
     explanation: str = Field(min_length=1, max_length=1500)
     matched_issue_ids: list[str]
+    tests: CoverageTests
+
+
+class CrossIssueFinding(Structured):
+    finding_id: str = Field(pattern=r"^X[1-9][0-9]{0,5}$")
+    kind: Literal["DUPLICATE", "FRAGMENTATION", "OVER_MERGING"]
+    issue_ids: list[IssueId] = Field(min_length=1)
+    explanation: str = Field(min_length=1, max_length=1500)
+
+
+class CrossIssueEvaluation(Structured):
+    coverage: CriterionReview
+    deduplication: CriterionReview
+    fragmentation: CriterionReview
+    over_merging: CriterionReview
+    findings: list[CrossIssueFinding]
 
 
 class BlindComparison(Structured):
@@ -153,6 +252,7 @@ class JudgeOutput(Structured):
     rubric: EvaluationRubric
     coverage_analysis: list[CoverageItem]
     blind_comparison: list[BlindComparison]
+    cross_issue_evaluation: CrossIssueEvaluation
     error_codes: list[ErrorCode]
     feedback: str = Field(max_length=1500)
     generator_visible_feedback: list[Feedback]

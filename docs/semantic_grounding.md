@@ -1,3 +1,5 @@
+> Tài liệu lịch sử contract v4. Contract hiện tại là v5: xem [hierarchical_judge.md](hierarchical_judge.md). Quy tắc private scope và schema Judge bên dưới đã được thay thế.
+
 # Quote-free semantic grounding — contract v4
 
 Refactor theo yêu cầu ngày 2026-11-13 tại `/mnt/hdd/nhatminh/LegalDataset`.

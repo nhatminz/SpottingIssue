@@ -145,4 +145,5 @@ def test_safe_history_ids_cannot_be_a_private_text_channel():
     from legal_issue_pipeline.schemas import SafeFeedback
     with pytest.raises(ValidationError):
         SafeFeedback.model_validate_json(json.dumps(dict(feedback_id='F1',issue_ids=['APPLICATION_ONLY_SECRET'],
-            error_code='UNSUPPORTED_FACT',action='REVISE',explanation='Phần chỉ dẫn này không chứa ID của một issue hợp lệ.')))
+            error_code='UNSUPPORTED_FACT',action='REVISE',failed_criterion='factual_grounding.actor_grounding',
+            problem='ID issue không hợp lệ.',reason='Feedback chỉ được tham chiếu ID hiện tại.',requested_change='Sử dụng ID issue hợp lệ.')))

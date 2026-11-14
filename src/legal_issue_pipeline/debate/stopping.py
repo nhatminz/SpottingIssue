@@ -1,6 +1,7 @@
 from __future__ import annotations
 from ..config import digest
 from ..schemas import GeneratorOutput, JudgeOutput
+from ..validators.judge_validator import atomic_reviews
 
 
 class StagnationDetector:
@@ -13,10 +14,12 @@ class StagnationDetector:
 
     def observe(self, candidate: GeneratorOutput, judge: JudgeOutput) -> bool:
         signature = digest({"issues": sorted((i.issue_text, i.explain, i.focus_group, i.focus, i.subject_action, i.decisive_fact) for i in candidate.issues),
-                            "feedback": sorted((tuple(f.issue_ids), f.error_code.value, f.action, f.explanation) for f in judge.generator_visible_feedback),
+                            "feedback": sorted((tuple(f.issue_ids), f.error_code.value, f.action, f.failed_criterion, f.problem, f.reason, f.requested_change, tuple((r.issue_id, r.criterion) for r in f.criterion_refs), tuple(f.coverage_ids), tuple(f.cross_issue_ids)) for f in judge.generator_visible_feedback),
                             "rebuttal": sorted((r.feedback_id, r.decision, r.facts_argument) for r in candidate.responses_to_feedback),
                             "assessments": sorted((a.feedback_id, a.decision, a.explanation) for a in judge.rebuttal_assessments),
                             "private_scope": sorted((s.issue_id, s.judicial_relevance_confirmed, s.conclusion_consistent) for s in candidate.private_judicial_support),
+                            "criteria": [[(path, c.status) for path,c in atomic_reviews(r)] for r in judge.per_issue_reviews],
+                            "cross_issue": judge.cross_issue_evaluation.model_dump(mode="json"),
                             "verdict": judge.overall_verdict})
         signals = []
         if signature in self.signatures:

@@ -5,10 +5,11 @@ import json
 from contextlib import ExitStack
 
 from ..agents.base_agent import reject_duplicate_keys
+from ..agents.judge import public_candidate, validate_structure
 from ..config import PipelineConfig
 from ..validators.output_validator import validate_output
 from ..validators.judge_validator import scope_rubric_passes
-from ..schemas import GeneratorOutput, JudgeOutput, CONTRACT_VERSION
+from ..schemas import GeneratorOutput, JudgeOutput, DiscoveryOutput, CONTRACT_VERSION
 from ..validators.format_validator import candidate_errors
 from .jsonl_reader import JSONLReader
 from .jsonl_writer import JSONLWriter
@@ -32,14 +33,19 @@ class ResultExporter:
             or audit.get("final_explain") != row["output"].get("explain")):
             raise ValueError("COMPLETED checkpoint lacks final Judge PASS and required validation proof")
         generated = GeneratorOutput.model_validate_json(json.dumps(audit.get("final_generator", {})))
+        discovery = (DiscoveryOutput.model_validate_json(json.dumps(audit["blind_discovery"]))
+                     if audit.get("blind_discovery") is not None else None)
+        # Recheck correspondence against the actual exported candidate and the
+        # saved discovery, rather than trusting an internally consistent subset.
+        validate_structure(JudgeOutput.model_validate_json(json.dumps(judge)),
+                           public_candidate(generated, row["output"]["benchmark_seed"]["facts_clean"]), discovery)
         if ([i.issue_text for i in generated.issues] != row["output"]["issues"] or
             [i.explain for i in generated.issues] != row["output"]["explain"] or
             len(generated.private_judicial_support) != len(generated.issues) or
             len({i.issue_id for i in generated.issues}) != len(generated.issues) or
             {r["issue_id"] for r in judge["per_issue_reviews"]} != {i.issue_id for i in generated.issues} or
-            {s.issue_id for s in generated.private_judicial_support} != {i.issue_id for i in generated.issues} or
-            any(not s.judicial_relevance_confirmed or not s.conclusion_consistent for s in generated.private_judicial_support)):
-            raise ValueError("Missing Generator judicial-scope proof or issue/explain alignment")
+            {s.issue_id for s in generated.private_judicial_support} != {i.issue_id for i in generated.issues}):
+            raise ValueError("Missing Generator private audit entries or issue/explain alignment")
 
     @staticmethod
     def rejected_case(row: dict) -> dict:

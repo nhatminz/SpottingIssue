@@ -64,9 +64,8 @@ class GeneratorAgent(BaseAgent):
         supports = [s.issue_id for s in output.private_judicial_support]
         if set(supports) != ids or len(supports) != len(ids):
             raise ValueError("Every issue needs exactly one private judicial support entry")
-        # False scope assessments are semantic findings, not malformed JSON.
-        # The controller asks Generator to reconsider them and cannot export
-        # an unresolved scope assessment even if the facts-only Judge passes.
+        # Private adjudication flags are descriptive audit metadata. They do not
+        # veto a facts-supported question that the court chose not to adjudicate.
         expected = {f.feedback_id for f in feedback}
         actual = [r.feedback_id for r in output.responses_to_feedback]
         if set(actual) != expected or len(actual) != len(expected):
